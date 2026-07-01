@@ -1,7 +1,6 @@
 package yamlx
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
@@ -10,12 +9,13 @@ import (
 
 // Unmarshal takes a YAML byte slice `in` and unmarshals it into the object `o`.
 // Processing order:
-//  1. Collect $var definitions from YAML keys (top to bottom)
-//  2. Resolve $var references
-//  3. Resolve !if conditionals
-//  4. Resolve !include tags
-//  5. Resolve ${VAR} environment variable substitution
-//  6. Unmarshal into target struct
+//  1. Extract $var definitions from raw bytes
+//  2. Preprocess !if conditionals
+//  3. Parse YAML into AST
+//  4. Resolve $var references
+//  5. Resolve !include tags
+//  6. Resolve ${VAR} env substitution (directly on AST)
+//  7. Unmarshal into target struct
 func Unmarshal(in []byte, o any) error {
 	vars := extractRawVars(in)
 	out := preprocessIf(in, vars)
@@ -31,90 +31,67 @@ func Unmarshal(in []byte, o any) error {
 		return err
 	}
 
-	marshalled, err := yaml.Marshal(&doc)
-	if err != nil {
+	if err := resolveEnvVars(&doc); err != nil {
 		return err
 	}
 
-	ymlBytes, err := resolveEnvVars(marshalled)
+	return yaml.Unmarshal(nodeToBytes(&doc), o)
+}
+
+// nodeToBytes marshals a yaml.Node back to bytes for final unmarshalling.
+func nodeToBytes(node *yaml.Node) []byte {
+	out, err := yaml.Marshal(node)
 	if err != nil {
-		return err
+		return nil
 	}
-
-	return yaml.Unmarshal(ymlBytes, o)
+	return out
 }
 
-// validMapping checks if the input is a map[string]any and returns it.
-func validMapping(in any) (map[string]any, error) {
-	comma, ok := in.(map[string]any)
-	if !ok {
-		err := fmt.Sprintf("Invalid config: got %T", in)
-		return nil, NewConfigError(err)
+// resolveEnvVars walks the yaml.Node tree and resolves ${VAR} placeholders directly.
+func resolveEnvVars(node *yaml.Node) error {
+	if node == nil {
+		return nil
 	}
-	return comma, nil
-}
 
-// resolveEnvVars converts the input YAML bytes into a map, resolves
-// environment variable placeholders, and marshals it back into bytes.
-func resolveEnvVars(in []byte) ([]byte, error) {
-	var config any
-	if err := yaml.Unmarshal(in, &config); err != nil {
-		return nil, err
-	}
-	if err := resolveConfig(&config); err != nil {
-		return nil, err
-	}
-	return yaml.Marshal(config)
-}
-
-// resolveConfig recursively walks through the config map and replaces environment variable placeholders.
-func resolveConfig(config *any) error {
-	MapConfig, err := validMapping(*config)
-	if err != nil {
-		return err
-	}
-	for k, v := range MapConfig {
-		if MapConfig[k], err = resolveConfigVars(v); err != nil {
-			return err
+	switch node.Kind {
+	case yaml.DocumentNode:
+		for _, child := range node.Content {
+			if err := resolveEnvVars(child); err != nil {
+				return err
+			}
+		}
+	case yaml.MappingNode:
+		for i := 0; i < len(node.Content); i += 2 {
+			if err := resolveEnvVars(node.Content[i+1]); err != nil {
+				return err
+			}
+		}
+	case yaml.SequenceNode:
+		for _, child := range node.Content {
+			if err := resolveEnvVars(child); err != nil {
+				return err
+			}
+		}
+	case yaml.ScalarNode:
+		if node.Tag == "!!str" && strings.Contains(node.Value, "${") {
+			resolved, err := resolvePlaceHolder(node.Value)
+			if err != nil {
+				return err
+			}
+			node.Value = resolved
 		}
 	}
 	return nil
 }
 
-// resolveConfigVars recursively resolves values in nested maps, replacing strings like ${VAR} with os.Getenv(VAR).
-func resolveConfigVars(config any) (any, error) {
-	MapConfig, err := validMapping(config)
-	if err != nil {
-		return resolvePlaceHolder(config)
-	}
-	for k, v := range MapConfig {
-		if value, ok := v.(string); ok {
-			resolved, err := resolvePlaceHolder(value)
-			if err != nil {
-				return nil, err
-			}
-			MapConfig[k] = resolved
-			continue
-		}
-		if MapConfig[k], err = resolveConfigVars(v); err != nil {
-			return nil, err
-		}
-	}
-	return config, nil
-}
-
 // resolvePlaceHolder checks if a string contains a placeholder of the form ${VAR},
-// ${VAR:-default}, or ${VAR:?error} and replaces it with the appropriate value.
-func resolvePlaceHolder(value any) (any, error) {
-	strValue, ok := value.(string)
-	if !ok {
-		return value, nil
-	}
-	if !strings.Contains(strValue, "${") {
+// ${VAR:-default}, ${VAR:?}, or ${VAR:|opt1|opt2} and resolves it.
+func resolvePlaceHolder(value string) (string, error) {
+	if !strings.Contains(value, "${") {
 		return value, nil
 	}
 
-	result := strValue
+	result := value
 	for {
 		start := strings.Index(result, "${")
 		if start == -1 {
@@ -143,7 +120,7 @@ func resolvePlaceHolder(value any) (any, error) {
 			varName := inner[:idx]
 			envVal := os.Getenv(varName)
 			if envVal == "" {
-				return nil, NewRequiredError(varName)
+				return "", NewRequiredError(varName)
 			}
 			replacement = envVal
 		} else if idx := strings.Index(inner, ":|"); idx != -1 {
@@ -159,7 +136,7 @@ func resolvePlaceHolder(value any) (any, error) {
 				}
 			}
 			if !valid {
-				return nil, NewInvalidValueError(varName, envVal, allowed)
+				return "", NewInvalidValueError(varName, envVal, allowed)
 			}
 			replacement = envVal
 		} else {

@@ -4,11 +4,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
 const defaultMaxDepth = 10
+
+var (
+	fileCache   = make(map[string][]byte)
+	parsedCache = make(map[string]*yaml.Node)
+	cacheMu     sync.RWMutex
+)
 
 // resolveIncludes walks a yaml.Node tree and resolves any nodes tagged with !include.
 func resolveIncludes(node *yaml.Node) error {
@@ -56,7 +63,6 @@ func resolveIncludesWalk(node *yaml.Node, basePath string, seen map[string]bool,
 }
 
 // resolveIncludeNode replaces a !include node with the content of the referenced file.
-// Supports: !include ./file.yaml, !include ./file.yaml:? (required), !include ./file.yaml:-fallback.yaml
 func resolveIncludeNode(node *yaml.Node, basePath string, seen map[string]bool, depth, maxDepth int) error {
 	if depth >= maxDepth {
 		return NewIncludeError(node.Value, "depth")
@@ -89,7 +95,7 @@ func resolveIncludeNode(node *yaml.Node, basePath string, seen map[string]bool, 
 	}
 	seen[absPath] = true
 
-	data, err := os.ReadFile(absPath)
+	data, err := readFileCached(absPath)
 	if err != nil {
 		delete(seen, absPath)
 		if mode == "default" {
@@ -117,7 +123,7 @@ func resolveIncludeFile(node *yaml.Node, filePath, basePath string, seen map[str
 	}
 	seen[absPath] = true
 
-	data, err := os.ReadFile(absPath)
+	data, err := readFileCached(absPath)
 	if err != nil {
 		delete(seen, absPath)
 		return NewIncludeError(filePath, "not_found")
@@ -128,13 +134,13 @@ func resolveIncludeFile(node *yaml.Node, filePath, basePath string, seen map[str
 
 // loadIncludedContent parses YAML data, resolves nested includes, and replaces the node.
 func loadIncludedContent(node *yaml.Node, data []byte, absPath string, seen map[string]bool) error {
-	var included yaml.Node
-	if err := yaml.Unmarshal(data, &included); err != nil {
+	included, err := parseCached(absPath, data)
+	if err != nil {
 		return err
 	}
 
 	incBase := filepath.Dir(absPath)
-	if err := resolveIncludesWalk(&included, incBase, seen, 1, defaultMaxDepth); err != nil {
+	if err := resolveIncludesWalk(included, incBase, seen, 1, defaultMaxDepth); err != nil {
 		return err
 	}
 
@@ -143,8 +149,60 @@ func loadIncludedContent(node *yaml.Node, data []byte, absPath string, seen map[
 	if included.Kind == yaml.DocumentNode && len(included.Content) == 1 {
 		*node = *included.Content[0]
 	} else {
-		*node = included
+		*node = *included
 	}
 
 	return nil
+}
+
+// readFileCached reads a file and caches its contents.
+func readFileCached(path string) ([]byte, error) {
+	cacheMu.RLock()
+	data, ok := fileCache[path]
+	cacheMu.RUnlock()
+	if ok {
+		return data, nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	cacheMu.Lock()
+	fileCache[path] = data
+	cacheMu.Unlock()
+
+	return data, nil
+}
+
+// parseCached parses YAML data and caches the parsed node.
+func parseCached(path string, data []byte) (*yaml.Node, error) {
+	cacheMu.RLock()
+	node, ok := parsedCache[path]
+	cacheMu.RUnlock()
+	if ok {
+	 copy := *node
+		return &copy, nil
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+
+	cacheMu.Lock()
+	parsedCache[path] = &doc
+	cacheMu.Unlock()
+
+	copy := doc
+	return &copy, nil
+}
+
+// ResetCache clears the file and parsed caches. Useful for tests.
+func ResetCache() {
+	cacheMu.Lock()
+	fileCache = make(map[string][]byte)
+	parsedCache = make(map[string]*yaml.Node)
+	cacheMu.Unlock()
 }
