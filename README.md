@@ -1,14 +1,10 @@
 # yamlx
 
-A lightweight Go package for parsing YAML with environment variable substitution and file includes. Drop-in replacement for `gopkg.in/yaml.v3` with superpowers.
+A lightweight Go package for parsing YAML with environment variables, file includes, inline variables, conditionals, and enum validation. One function, zero config.
 
-## Features
-
-- **Environment variable substitution** — `${VAR}`, `${VAR:-default}`, `${VAR:?}`
-- **File includes** — `!include ./other.yaml` with recursive and circular-include detection
-- **Same syntax for both** — `:?` means required, `:-` means default fallback
-- **Fully typed** — unmarshals directly into your Go structs
-- **Zero config** — one function, no setup
+```go
+yamlx.Unmarshal(yml, &cfg)
+```
 
 ## Install
 
@@ -30,17 +26,21 @@ import (
 
 type Config struct {
     Name    string `yaml:"name"`
-    Version string `yaml:"version"`
     Port    int    `yaml:"port"`
+    Network struct {
+        Type   string `yaml:"type"`
+        Subnet string `yaml:"subnet"`
+    } `yaml:"network"`
 }
 
 func main() {
     os.Setenv("APP_NAME", "myapp")
+    os.Setenv("APP_ENV", "production")
 
     yml := []byte(`
 name: ${APP_NAME}
-version: v1.0.0
-port: 8080
+port: !if "${APP_ENV}" == "production" 443 else 8080
+network: !include ./network.yaml
 `)
 
     var cfg Config
@@ -49,51 +49,88 @@ port: 8080
     }
 
     fmt.Printf("%+v\n", cfg)
-    // {Name:myapp Version:v1.0.0 Port:8080}
 }
 ```
 
-## Environment Variables
+---
 
-### Basic substitution
+## Features
+
+### Environment Variables `${VAR}`
+
+Basic substitution from OS environment:
 
 ```yaml
 name: ${CLIENT_NAME}
-```
-
-Replaces `${CLIENT_NAME}` with the value of the `CLIENT_NAME` environment variable. If unset, the value is an empty string.
-
-### Default values
-
-```yaml
-name: ${NAME:-anonymous}
 log_level: ${LOG_LEVEL:-info}
-```
-
-Uses the provided default when the variable is unset or empty.
-
-### Required variables
-
-```yaml
 database_url: ${DATABASE_URL:?}
-api_key: ${API_KEY:?}
 ```
 
-Returns an error if the variable is unset or empty. Use this for values that must be present.
+| Syntax | Behavior |
+|---|---|
+| `${VAR}` | Replace with env value (empty string if unset) |
+| `${VAR:-default}` | Use `default` if unset or empty |
+| `${VAR:?}` | Error if unset or empty |
+| `${VAR:\|a\|b\|c}` | Error if value is not one of `a`, `b`, `c` |
 
-### Composing values
+Multiple placeholders in one string:
 
 ```yaml
 endpoint: ${SCHEME}://${HOST:-localhost}:${PORT:-8080}/${BASE_PATH:-v1}
 ```
 
-Multiple placeholders in a single string work fine.
+### Enum Validation `${VAR:|val1|val2}`
 
-## File Includes
+Constrain a variable to a set of allowed values:
 
-### Basic include
+```yaml
+environment: ${APP_ENV:|production|staging|development}
+region: ${AWS_REGION:|us-east-1|us-west-2|eu-west-1}
+```
 
-Split your config into multiple files and compose them:
+If `APP_ENV` is `invalid`, you get:
+
+```
+invalid value "invalid" for variable APP_ENV: must be one of [production|staging|development]
+```
+
+### Inline Variables `$var`
+
+Define a key in your YAML and reference it below:
+
+```yaml
+env: production
+region: us-east-1
+
+# $env and $region are available because they appear above
+port: !if "$env" == "production" 443 else 8080
+log_level: !if "$env" == "production" warn else debug
+```
+
+Variables are resolved top to bottom. Each key becomes available as `$key` for lines below it.
+
+### Conditionals `!if`
+
+Inline if/else directly in YAML:
+
+```yaml
+env: production
+
+port: !if "$env" == "production" 443 else 8080
+log: !if "$env" != "production" debug else warn
+```
+
+Works with OS env vars too:
+
+```yaml
+log: !if "${APP_ENV}" == "production" warn else debug
+```
+
+Conditionals are pre-processed before YAML parsing, so the syntax stays clean.
+
+### File Includes `!include`
+
+Load other YAML files:
 
 **network.yaml**
 ```yaml
@@ -110,64 +147,19 @@ ports:
   - 8545
 ```
 
-Result after loading:
-```yaml
-name: lighthouse
-network:
-  type: p2p
-  subnet: 10.0.0.0/24
-ports:
-  - 30303
-  - 8545
-```
+| Syntax | Behavior |
+|---|---|
+| `!include ./file.yaml` | Load file (error if missing) |
+| `!include ./file.yaml:?` | Required (error if missing) |
+| `!include ./file.yaml:-./fallback.yaml` | Use fallback if primary missing |
 
-### Required include
-
-```yaml
-config: !include ./network.yaml:?
-```
-
-Errors if the file does not exist. Same behavior as `${VAR:?}`.
-
-### Default include (fallback)
-
-```yaml
-config: !include ./custom.yaml:-./defaults.yaml
-```
-
-If `./custom.yaml` does not exist, loads `./defaults.yaml` instead. Same behavior as `${VAR:-default}`.
-
-### Recursive includes
-
-Included files can include other files. There is a max depth of 10 to prevent infinite loops.
-
-**base.yaml**
-```yaml
-type: p2p
-```
-
-**network.yaml**
-```yaml
-!include ./base.yaml
-subnet: 10.0.0.0/24
-```
-
-**main.yaml**
-```yaml
-network: !include ./network.yaml
-```
-
-### Circular include detection
-
-If file A includes file B and file B includes file A, you get a clear error:
+Recursive includes work. Circular includes are detected:
 
 ```
 circular include detected: ./file_a.yaml
 ```
 
-### Env vars in included files
-
-Environment variable substitution works inside included files too:
+Env var substitution works inside included files:
 
 **defaults.yaml**
 ```yaml
@@ -180,26 +172,39 @@ region: ${REGION:-us-east-1}
 settings: !include ./defaults.yaml
 ```
 
+---
+
+## Processing Order
+
+```
+1. Extract $var definitions from raw bytes
+2. Preprocess !if conditionals
+3. Parse YAML into AST
+4. Resolve $var references
+5. Resolve !include tags
+6. Resolve ${VAR} env substitution
+7. Unmarshal into Go struct
+```
+
 ## Error Handling
 
 All errors come from `yamlx.Unmarshal`:
 
 | Error | Cause |
 |---|---|
-| `include file not found: ./file.yaml` | `!include` references a file that does not exist |
+| `required environment variable X is not set` | `${X:?}` used but `X` is unset |
+| `invalid value "X" for variable Y: must be one of [...]` | `${Y:\|a\|b\|c}` but value not in set |
+| `include file not found: ./file.yaml` | `!include` references missing file |
 | `circular include detected: ./file.yaml` | Two files include each other |
 | `max include depth exceeded` | Includes nested more than 10 levels deep |
-| `required environment variable X is not set` | `${X:?}` used but `X` is unset |
 
 ## API
 
 ```go
-// Unmarshal parses YAML bytes into a struct.
-// Resolves !include tags first, then environment variables, then unmarshals.
 func Unmarshal(in []byte, o any) error
 ```
 
-That's it. One function.
+One function. Parses YAML, resolves everything, unmarshals into your struct.
 
 ## License
 
