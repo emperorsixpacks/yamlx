@@ -2,6 +2,7 @@ package envsubt
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -169,5 +170,126 @@ func TestCompose(t *testing.T) {
 		err := Unmarshal(yml, &config)
 		assert.NoError(t, err)
 		assert.Equal(t, "https://localhost:443/v1", config.Endpoint)
+	})
+}
+
+func TestIncludes(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	writeFile := func(name, content string) {
+		t.Helper()
+		err := os.WriteFile(filepath.Join(tmpDir, name), []byte(content), 0644)
+		assert.NoError(t, err)
+	}
+
+	writeFile("network.yaml", `
+type: p2p
+subnet: 10.0.0.0/24
+`)
+	writeFile("ports.yaml", `- 30303
+- 8545
+`)
+	writeFile("deep.yaml", `
+level: deep
+child: !include child.yaml
+`)
+	writeFile("child.yaml", `
+level: child
+`)
+	writeFile("circular_a.yaml", `next: !include circular_b.yaml
+`)
+	writeFile("circular_b.yaml", `next: !include circular_a.yaml
+`)
+	writeFile("env_include.yaml", `greeting: ${HELLO:-hello}
+value: world
+`)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origDir)
+
+	t.Run("basic include", func(t *testing.T) {
+		yml := []byte(`name: lighthouse
+network: !include network.yaml
+`)
+		var config struct {
+			Name    string `yaml:"name"`
+			Network struct {
+				Type   string `yaml:"type"`
+				Subnet string `yaml:"subnet"`
+			} `yaml:"network"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "lighthouse", config.Name)
+		assert.Equal(t, "p2p", config.Network.Type)
+		assert.Equal(t, "10.0.0.0/24", config.Network.Subnet)
+	})
+
+	t.Run("include sequence", func(t *testing.T) {
+		yml := []byte(`ports: !include ports.yaml
+`)
+		var config struct {
+			Ports []int `yaml:"ports"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, []int{30303, 8545}, config.Ports)
+	})
+
+	t.Run("recursive include", func(t *testing.T) {
+		yml := []byte(`config: !include deep.yaml
+`)
+		var config struct {
+			Config struct {
+				Level string `yaml:"level"`
+				Child struct {
+					Level string `yaml:"level"`
+				} `yaml:"child"`
+			} `yaml:"config"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "deep", config.Config.Level)
+		assert.Equal(t, "child", config.Config.Child.Level)
+	})
+
+	t.Run("env vars in included files", func(t *testing.T) {
+		os.Setenv("HELLO", "hi")
+		defer os.Unsetenv("HELLO")
+		yml := []byte(`data: !include env_include.yaml
+`)
+		var config struct {
+			Data struct {
+				Greeting string `yaml:"greeting"`
+				Value    string `yaml:"value"`
+			} `yaml:"data"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "hi", config.Data.Greeting)
+		assert.Equal(t, "world", config.Data.Value)
+	})
+
+	t.Run("missing file returns error", func(t *testing.T) {
+		yml := []byte(`data: !include nonexistent.yaml
+`)
+		var config struct {
+			Data any `yaml:"data"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "include file not found")
+	})
+
+	t.Run("circular include returns error", func(t *testing.T) {
+		yml := []byte(`data: !include circular_a.yaml
+`)
+		var config struct {
+			Data any `yaml:"data"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "circular include detected")
 	})
 }
