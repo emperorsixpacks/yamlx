@@ -1,5 +1,5 @@
-// Package envsubt provides YAML unmarshalling with environment variable substitution support.
-package envsubt
+// Package yamlx provides YAML unmarshalling with environment variable substitution and !include support.
+package yamlx
 
 import (
 	"fmt"

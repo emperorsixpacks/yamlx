@@ -1,4 +1,4 @@
-module github.com/emperorsixpacks/envsubst
+module github.com/emperorsixpacks/yamlx
 
 go 1.23.6
 

@@ -1,4 +1,4 @@
-package envsubt
+package yamlx
 
 import (
 	"os"

@@ -1,6 +1,6 @@
-# envsubst
+# yamlx
 
-A lightweight Go package for substituting environment variables in configuration strings, similar to Docker Compose's `${VAR}` syntax.
+A lightweight Go package for loading YAML files with environment variable substitution and file includes, similar to Docker Compose's `${VAR}` syntax.
 
 ## Features
 
@@ -11,7 +11,7 @@ A lightweight Go package for substituting environment variables in configuration
 ## Installation
 
 ```bash
-go get github.com/emperorsixpacks/envsubst
+go get github.com/emperorsixpacks/yamlx
 ````
 
 ## Usage
@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/emperorsixpacks/envsubst"
+	"github.com/emperorsixpacks/yamlx"
 )
 
 type Config struct {
@@ -43,7 +43,7 @@ network: testnet
 `)
 
 	var cfg Config
-	if err := envsubst.Unmarshal(yml, &cfg); err != nil {
+	if err := yamlx.Unmarshal(yml, &cfg); err != nil {
 		panic(err)
 	}
 
@@ -94,7 +94,7 @@ ports:
 `)
 
 var cfg Config
-envsubst.Unmarshal(yml, &cfg)
+yamlx.Unmarshal(yml, &cfg)
 // cfg.Network.Type == "p2p"
 ```
 
