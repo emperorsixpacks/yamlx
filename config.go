@@ -192,14 +192,31 @@ func resolveIncludes(node *yaml.Node, basePath string, seen map[string]bool, dep
 }
 
 // resolveIncludeNode replaces a !include node with the content of the referenced file.
+// Supports: !include ./file.yaml, !include ./file.yaml:? (required), !include ./file.yaml:-fallback.yaml
 func resolveIncludeNode(node *yaml.Node, basePath string, seen map[string]bool, depth, maxDepth int) error {
 	if depth >= maxDepth {
 		return NewIncludeError(node.Value, "depth")
 	}
 
-	incPath := node.Value
+	rawPath := node.Value
+	var incPath, mode, fallback string
+
+	if idx := strings.Index(rawPath, ":-"); idx != -1 {
+		incPath = rawPath[:idx]
+		mode = "default"
+		fallback = rawPath[idx+2:]
+	} else if idx := strings.Index(rawPath, ":?"); idx != -1 {
+		incPath = rawPath[:idx]
+		mode = "required"
+	} else {
+		incPath = rawPath
+	}
+
 	absPath, err := filepath.Abs(filepath.Join(basePath, incPath))
 	if err != nil {
+		if mode == "default" {
+			return resolveIncludeFile(node, fallback, basePath, seen, depth, maxDepth)
+		}
 		return NewIncludeError(incPath, "not_found")
 	}
 
@@ -210,16 +227,53 @@ func resolveIncludeNode(node *yaml.Node, basePath string, seen map[string]bool, 
 
 	data, err := os.ReadFile(absPath)
 	if err != nil {
+		delete(seen, absPath)
+		if mode == "default" {
+			return resolveIncludeFile(node, fallback, basePath, seen, depth, maxDepth)
+		}
+		if mode == "required" {
+			return NewIncludeError(incPath, "not_found")
+		}
 		return NewIncludeError(incPath, "not_found")
 	}
 
+	return loadIncludedContent(node, data, absPath, seen)
+}
+
+// resolveIncludeFile loads a YAML file by path and replaces the node.
+func resolveIncludeFile(node *yaml.Node, filePath, basePath string, seen map[string]bool, depth, maxDepth int) error {
+	if depth >= maxDepth {
+		return NewIncludeError(filePath, "depth")
+	}
+
+	absPath, err := filepath.Abs(filepath.Join(basePath, filePath))
+	if err != nil {
+		return NewIncludeError(filePath, "not_found")
+	}
+
+	if seen[absPath] {
+		return NewIncludeError(filePath, "cycle")
+	}
+	seen[absPath] = true
+
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		delete(seen, absPath)
+		return NewIncludeError(filePath, "not_found")
+	}
+
+	return loadIncludedContent(node, data, absPath, seen)
+}
+
+// loadIncludedContent parses YAML data, resolves nested includes, and replaces the node.
+func loadIncludedContent(node *yaml.Node, data []byte, absPath string, seen map[string]bool) error {
 	var included yaml.Node
 	if err := yaml.Unmarshal(data, &included); err != nil {
 		return err
 	}
 
 	incBase := filepath.Dir(absPath)
-	if err := resolveIncludes(&included, incBase, seen, depth+1, maxDepth); err != nil {
+	if err := resolveIncludes(&included, incBase, seen, 1, defaultMaxDepth); err != nil {
 		return err
 	}
 

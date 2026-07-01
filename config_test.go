@@ -292,4 +292,78 @@ network: !include network.yaml
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "circular include detected")
 	})
+
+	t.Run("required include errors when file missing", func(t *testing.T) {
+		yml := []byte(`data: !include missing.yaml:?
+`)
+		var config struct {
+			Data any `yaml:"data"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "include file not found")
+	})
+
+	t.Run("required include succeeds when file exists", func(t *testing.T) {
+		yml := []byte(`data: !include network.yaml:?
+`)
+		var config struct {
+			Data struct {
+				Type string `yaml:"type"`
+			} `yaml:"data"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "p2p", config.Data.Type)
+	})
+
+	t.Run("default include uses fallback when file missing", func(t *testing.T) {
+		writeFile("fallback.yaml", `source: fallback
+value: from_fallback
+`)
+		yml := []byte(`data: !include nonexistent.yaml:-fallback.yaml
+`)
+		var config struct {
+			Data struct {
+				Source string `yaml:"source"`
+				Value  string `yaml:"value"`
+			} `yaml:"data"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "fallback", config.Data.Source)
+		assert.Equal(t, "from_fallback", config.Data.Value)
+	})
+
+	t.Run("default include uses primary when file exists", func(t *testing.T) {
+		yml := []byte(`data: !include network.yaml:-fallback.yaml
+`)
+		var config struct {
+			Data struct {
+				Type   string `yaml:"type"`
+				Source string `yaml:"source"`
+			} `yaml:"data"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "p2p", config.Data.Type)
+		assert.Equal(t, "", config.Data.Source)
+	})
+
+	t.Run("default include also works with env vars in fallback", func(t *testing.T) {
+		writeFile("env_fallback.yaml", `greeting: ${HELLO:-hello}
+`)
+		os.Setenv("HELLO", "hey")
+		defer os.Unsetenv("HELLO")
+		yml := []byte(`data: !include missing.yaml:-env_fallback.yaml
+`)
+		var config struct {
+			Data struct {
+				Greeting string `yaml:"greeting"`
+			} `yaml:"data"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "hey", config.Data.Greeting)
+	})
 }
