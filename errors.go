@@ -42,6 +42,16 @@ func (e includeError) Error() string {
 	}
 }
 
+type invalidValueError struct {
+	varName   string
+	value     string
+	allowed   string
+}
+
+func (e invalidValueError) Error() string {
+	return "invalid value \"" + e.value + "\" for variable " + e.varName + ": must be one of [" + e.allowed + "]"
+}
+
 func NewTypeError(s string) typeError {
 	return typeError{s}
 }
@@ -56,4 +66,8 @@ func NewRequiredError(varName string) requiredError {
 
 func NewIncludeError(file, kind string) includeError {
 	return includeError{file: file, kind: kind}
+}
+
+func NewInvalidValueError(varName, value, allowed string) invalidValueError {
+	return invalidValueError{varName: varName, value: value, allowed: allowed}
 }

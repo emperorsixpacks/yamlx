@@ -367,3 +367,161 @@ value: from_fallback
 		assert.Equal(t, "hey", config.Data.Greeting)
 	})
 }
+
+func TestYamlVars(t *testing.T) {
+	t.Run("basic $var reference", func(t *testing.T) {
+		yml := []byte(`name: hello
+greeting: $name world
+`)
+		var config struct {
+			Name     string `yaml:"name"`
+			Greeting string `yaml:"greeting"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "hello", config.Name)
+		assert.Equal(t, "hello world", config.Greeting)
+	})
+
+	t.Run("$var defined above is available below", func(t *testing.T) {
+		yml := []byte(`env: production
+port: $env
+`)
+		var config struct {
+			Env  string `yaml:"env"`
+			Port string `yaml:"port"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "production", config.Env)
+		assert.Equal(t, "production", config.Port)
+	})
+
+	t.Run("$var does not replace ${VAR} env syntax", func(t *testing.T) {
+		os.Setenv("TEST_HOST", "example.com")
+		defer os.Unsetenv("TEST_HOST")
+		yml := []byte(`host: ${TEST_HOST}
+url: http://$host
+`)
+		var config struct {
+			Host string `yaml:"host"`
+			URL  string `yaml:"url"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "example.com", config.Host)
+		assert.Equal(t, "http://example.com", config.URL)
+	})
+}
+
+func TestConditionals(t *testing.T) {
+	t.Run("basic !if with ==", func(t *testing.T) {
+		yml := []byte(`env: production
+port: !if "$env" == "production" 443 else 8080
+`)
+		var config struct {
+			Env  string `yaml:"env"`
+			Port string `yaml:"port"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "production", config.Env)
+		assert.Equal(t, "443", config.Port)
+	})
+
+	t.Run("basic !if with !=", func(t *testing.T) {
+		yml := []byte(`env: dev
+port: !if "$env" == "production" 443 else 8080
+`)
+		var config struct {
+			Env  string `yaml:"env"`
+			Port string `yaml:"port"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "dev", config.Env)
+		assert.Equal(t, "8080", config.Port)
+	})
+
+	t.Run("!if with env var from OS", func(t *testing.T) {
+		os.Setenv("APP_ENV", "staging")
+		defer os.Unsetenv("APP_ENV")
+		yml := []byte(`log: !if "${APP_ENV}" == "production" warn else debug
+`)
+		var config struct {
+			Log string `yaml:"log"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "debug", config.Log)
+	})
+
+	t.Run("mixed $var and ${VAR} in condition", func(t *testing.T) {
+		os.Setenv("MY_REGION", "us-east-1")
+		defer os.Unsetenv("MY_REGION")
+		yml := []byte(`region: us-east-1
+result: !if "$region" == "${MY_REGION}" match else mismatch
+`)
+		var config struct {
+			Region string `yaml:"region"`
+			Result string `yaml:"result"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "match", config.Result)
+	})
+}
+
+func TestEnumValidation(t *testing.T) {
+	t.Run("valid value passes", func(t *testing.T) {
+		os.Setenv("APP_ENV", "production")
+		defer os.Unsetenv("APP_ENV")
+		yml := []byte(`env: ${APP_ENV:|production|staging|development}
+`)
+		var config struct {
+			Env string `yaml:"env"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "production", config.Env)
+	})
+
+	t.Run("invalid value errors", func(t *testing.T) {
+		os.Setenv("APP_ENV", "invalid")
+		defer os.Unsetenv("APP_ENV")
+		yml := []byte(`env: ${APP_ENV:|production|staging|development}
+`)
+		var config struct {
+			Env string `yaml:"env"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid value")
+		assert.Contains(t, err.Error(), "must be one of")
+	})
+
+	t.Run("empty value errors", func(t *testing.T) {
+		os.Unsetenv("APP_ENV")
+		yml := []byte(`env: ${APP_ENV:|production|staging|development}
+`)
+		var config struct {
+			Env string `yaml:"env"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid value")
+	})
+
+	t.Run("single allowed value", func(t *testing.T) {
+		os.Setenv("MODE", "prod")
+		defer os.Unsetenv("MODE")
+		yml := []byte(`mode: ${MODE:|prod}
+`)
+		var config struct {
+			Mode string `yaml:"mode"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "prod", config.Mode)
+	})
+}
