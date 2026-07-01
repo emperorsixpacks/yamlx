@@ -525,3 +525,21 @@ func TestEnumValidation(t *testing.T) {
 		assert.Equal(t, "prod", config.Mode)
 	})
 }
+
+func TestTiming(t *testing.T) {
+	yml := []byte(`
+name: test
+port: 8080
+`)
+	var config struct {
+		Name string `yaml:"name"`
+		Port int    `yaml:"port"`
+	}
+	timing, err := UnmarshalWithTiming(yml, &config)
+	assert.NoError(t, err)
+	assert.Equal(t, "test", config.Name)
+	assert.Equal(t, 8080, config.Port)
+	assert.True(t, timing.Total > 0, "total time should be > 0")
+	assert.True(t, timing.YAMLParse > 0, "yaml parse time should be > 0")
+	assert.True(t, timing.FinalParse > 0, "final parse time should be > 0")
+}
