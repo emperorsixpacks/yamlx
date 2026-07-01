@@ -139,3 +139,35 @@ func TestRequiredValues(t *testing.T) {
 		assert.Equal(t, "value", config.Name)
 	})
 }
+
+func TestCompose(t *testing.T) {
+	t.Run("multiple placeholders in one string", func(t *testing.T) {
+		os.Setenv("HOST", "example.com")
+		os.Setenv("PORT", "8080")
+		defer os.Unsetenv("HOST")
+		defer os.Unsetenv("PORT")
+		yml := []byte(`url: http://${HOST}:${PORT}`)
+		var config struct {
+			URL string `yaml:"url"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "http://example.com:8080", config.URL)
+	})
+
+	t.Run("mixed plain, default, and required placeholders", func(t *testing.T) {
+		os.Setenv("SCHEME", "https")
+		os.Setenv("API_PORT", "443")
+		os.Unsetenv("BASE_PATH")
+		defer os.Unsetenv("SCHEME")
+		defer os.Unsetenv("API_PORT")
+		defer os.Unsetenv("BASE_PATH")
+		yml := []byte(`endpoint: ${SCHEME}://${HOST:-localhost}:${API_PORT:?}/${BASE_PATH:-v1}`)
+		var config struct {
+			Endpoint string `yaml:"endpoint"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "https://localhost:443/v1", config.Endpoint)
+	})
+}
