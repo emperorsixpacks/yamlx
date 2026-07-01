@@ -81,11 +81,15 @@ func resolveConfigVars(config any) (any, error) {
 	MapConfig, err := validMapping(config)
 	if err != nil {
 		// Not a map, attempt to resolve as a single placeholder value.
-		return resolvePlaceHolder(config), nil
+		return resolvePlaceHolder(config)
 	}
 	for k, v := range MapConfig {
 		if value, ok := v.(string); ok {
-			MapConfig[k] = resolvePlaceHolder(value)
+			resolved, err := resolvePlaceHolder(value)
+			if err != nil {
+				return nil, err
+			}
+			MapConfig[k] = resolved
 			continue
 		}
 		if MapConfig[k], err = resolveConfigVars(v); err != nil {
@@ -95,19 +99,57 @@ func resolveConfigVars(config any) (any, error) {
 	return config, nil // MapConfig is a reference to config
 }
 
-// resolvePlaceHolder checks if a string contains a placeholder of the form ${VAR}
-// and replaces it with the value from the environment.
-func resolvePlaceHolder(value any) any {
+// resolvePlaceHolder checks if a string contains a placeholder of the form ${VAR},
+// ${VAR:-default}, or ${VAR:?error} and replaces it with the appropriate value.
+func resolvePlaceHolder(value any) (any, error) {
 	strValue, ok := value.(string)
 	if !ok {
-		return value
+		return value, nil
 	}
-	if strings.Contains(strValue, "${") {
-		last_index := len(strValue) - 1
-		first_index := 2
-		env_value := strValue[first_index:last_index]
-		return os.Getenv(env_value)
+	if !strings.Contains(strValue, "${") {
+		return value, nil
 	}
-	return value
+
+	result := strValue
+	for {
+		start := strings.Index(result, "${")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(result[start:], "}")
+		if end == -1 {
+			break
+		}
+		end += start
+
+		inner := result[start+2 : end]
+
+		var replacement string
+
+		if idx := strings.Index(inner, ":-"); idx != -1 {
+			varName := inner[:idx]
+			defaultVal := inner[idx+2:]
+			envVal := os.Getenv(varName)
+			if envVal == "" {
+				replacement = defaultVal
+			} else {
+				replacement = envVal
+			}
+		} else if idx := strings.Index(inner, ":?"); idx != -1 {
+			varName := inner[:idx]
+			envVal := os.Getenv(varName)
+			if envVal == "" {
+				return nil, NewRequiredError(varName)
+			}
+			replacement = envVal
+		} else {
+			varName := inner
+			replacement = os.Getenv(varName)
+		}
+
+		result = result[:start] + replacement + result[end+1:]
+	}
+
+	return result, nil
 }
 

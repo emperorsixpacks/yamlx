@@ -5,7 +5,8 @@ A lightweight Go package for substituting environment variables in configuration
 ## Features
 
 - ✅ Replaces `${VAR}` with the value of the corresponding environment variable
-- ❌ Does **not yet** support default values (`${VAR:-default}`) or required checks (`${VAR:?error}`) — *coming soon!*
+- ✅ Supports default values with `${VAR:-default}` (uses `default` when `VAR` is unset or empty)
+- ✅ Supports required variables with `${VAR:?}` (returns error when `VAR` is unset or empty)
 
 ## Installation
 
@@ -48,5 +49,27 @@ network: testnet
 
 	fmt.Printf("%+v\n", cfg)
 }
+```
+
+### Default Values
+
+Use `${VAR:-default}` to provide a fallback when the environment variable is not set:
+
+```go
+yml := []byte(`
+name: ${NAME:-anonymous}
+log_level: ${LOG_LEVEL:-info}
+`)
+```
+
+### Required Variables
+
+Use `${VAR:?}` to fail with an error if the environment variable is not set:
+
+```go
+yml := []byte(`
+database_url: ${DATABASE_URL:?}
+api_key: ${API_KEY:?}
+`)
 ```
 
