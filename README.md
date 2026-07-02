@@ -232,6 +232,29 @@ err := yamlx.Unmarshal(yml, &cfg)
 
 Validation runs **after** all env vars, includes, and conditionals are resolved. If your struct doesn't implement `Validate()`, it's simply skipped — zero overhead.
 
+## Environment Loading
+
+Implement `LoadEnv() error` on your struct and it runs automatically **before** `${VAR}` placeholders are resolved:
+
+```go
+type Config struct {
+    DBHost string `yaml:"db_host"`
+    DBPort int    `yaml:"db_port"`
+}
+
+func (c *Config) LoadEnv() error {
+    // Load a .env file, call APIs, or set vars programmatically.
+    // By the time this returns, os.Getenv will see everything.
+    return godotenv.Load(".env")
+}
+
+var cfg Config
+err := yamlx.Unmarshal(yml, &cfg)
+// ${DB_HOST} and ${DB_PORT} in YAML resolve using the env vars loaded above
+```
+
+`LoadEnv()` runs **even if** you pass `SkipEnvVars()` — it sets env vars into the OS, not into the YAML directly. If your struct doesn't implement `EnvLoader`, it's skipped — zero overhead.
+
 ---
 
 ## Processing Order
@@ -242,9 +265,10 @@ Validation runs **after** all env vars, includes, and conditionals are resolved.
 3. Parse YAML into AST
 4. Resolve $var and $a.b.c dot-path references
 5. Resolve !include tags
-6. Resolve ${VAR} env substitution
-7. Unmarshal into Go struct
-8. Call Validate() if implemented
+6. Call LoadEnv() if implemented
+7. Resolve ${VAR} env substitution
+8. Unmarshal into Go struct
+9. Call Validate() if implemented
 ```
 
 ## Error Handling
