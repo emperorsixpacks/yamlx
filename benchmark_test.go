@@ -56,6 +56,28 @@ version: v1
 	}
 }
 
+func BenchmarkUnmarshalDotPathVars(b *testing.B) {
+	yml := []byte(`
+storage:
+  redis:
+    redis_port: 6379
+    redis_host: redis
+  database:
+    database_port: 5432
+    database_host: postgres
+indexer:
+  redis_port: $storage.redis.redis_port
+  redis_host: $storage.redis.redis_host
+  db_port: $storage.database.database_port
+  db_host: $storage.database.database_host
+`)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var cfg map[string]any
+		Unmarshal(yml, &cfg)
+	}
+}
+
 func BenchmarkUnmarshalConditionals(b *testing.B) {
 	os.Setenv("BENCH_ENV", "production")
 	defer os.Unsetenv("BENCH_ENV")
