@@ -2,6 +2,7 @@ package yamlx
 
 import (
 	"os"
+	"reflect"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -63,8 +64,14 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 		}
 	}
 
-	if err := yaml.Unmarshal(nodeToBytes(&doc), o); err != nil {
+	if err := unmarshalClean(nodeToBytes(&doc), o); err != nil {
 		return err
+	}
+
+	if !cfg.skipValidation {
+		if err := validateStruct(o); err != nil {
+			return err
+		}
 	}
 
 	if v, ok := o.(Validator); ok {
@@ -184,4 +191,58 @@ func resolvePlaceHolder(value string) (string, error) {
 	}
 
 	return result, nil
+}
+
+// unmarshalClean preprocesses the target to strip custom yaml directives,
+// unmarshals into the clean type, then copies values back.
+func unmarshalClean(data []byte, o any) error {
+	ptr := reflect.ValueOf(o)
+	if ptr.Kind() != reflect.Pointer || ptr.Elem().Kind() != reflect.Struct {
+		return yaml.Unmarshal(data, o)
+	}
+
+	structType := ptr.Elem().Type()
+
+	if !hasCustomDirectives(structType) {
+		return yaml.Unmarshal(data, o)
+	}
+
+	cleanType := cleanYamlTags(structType)
+	cleanPtr := reflect.New(cleanType)
+
+	if err := yaml.Unmarshal(data, cleanPtr.Interface()); err != nil {
+		return err
+	}
+
+	cleanVal := cleanPtr.Elem()
+	origVal := ptr.Elem()
+	for i := 0; i < cleanType.NumField(); i++ {
+		origVal.Field(i).Set(cleanVal.Field(i))
+	}
+
+	return nil
+}
+
+// hasCustomDirectives checks if a struct type has any custom yaml directives.
+func hasCustomDirectives(t reflect.Type) bool {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("yaml")
+		if tag == "" {
+			continue
+		}
+		for _, part := range strings.Split(tag, ",") {
+			part = strings.TrimSpace(part)
+			if isDirective(part) {
+				return true
+			}
+		}
+	}
+	return false
 }
