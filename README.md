@@ -109,6 +109,37 @@ log_level: !if "$env" == "production" warn else debug
 
 Variables are resolved top to bottom. Each key becomes available as `$key` for lines below it.
 
+### Dot-Path Variables `$a.b.c`
+
+Reference nested values anywhere in the document using dot notation:
+
+```yaml
+storage:
+  redis:
+    redis_port: ${REDIS_PORT:-6379}
+    redis_host: ${REDIS_HOST:-redis}
+  database:
+    database_port: ${DATABASE_PORT:-5432}
+    database_host: ${DATABASE_HOST:-postgres}
+
+indexer:
+  redis_port: $storage.redis.redis_port
+  db_port: $storage.database.database_port
+```
+
+**Constraint:** references must be at the same level or above the target root. You cannot use `$storage.database.port` from anywhere inside the `storage` subtree:
+
+```yaml
+storage:
+  database:
+    port: 5432
+  cache:
+    # ❌ ERROR - inside storage subtree
+    fallback: $storage.database.port
+```
+
+Unknown paths are left as-is (unlike simple `$var` which must exist).
+
 ### Conditionals `!if`
 
 Inline if/else directly in YAML:
@@ -209,7 +240,7 @@ Validation runs **after** all env vars, includes, and conditionals are resolved.
 1. Extract $var definitions from raw bytes
 2. Preprocess !if conditionals
 3. Parse YAML into AST
-4. Resolve $var references
+4. Resolve $var and $a.b.c dot-path references
 5. Resolve !include tags
 6. Resolve ${VAR} env substitution
 7. Unmarshal into Go struct
