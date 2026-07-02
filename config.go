@@ -101,7 +101,7 @@ func resolveEnvVars(node *yaml.Node) error {
 }
 
 // resolvePlaceHolder checks if a string contains a placeholder of the form ${VAR},
-// ${VAR:-default}, ${VAR:?}, or ${VAR:|opt1|opt2} and resolves it.
+// ${VAR:-default}, ${VAR:?}, or ${VAR:,opt1,opt2} and resolves it.
 func resolvePlaceHolder(value string) (string, error) {
 	if !strings.Contains(value, "${") {
 		return value, nil
@@ -139,11 +139,11 @@ func resolvePlaceHolder(value string) (string, error) {
 				return "", NewRequiredError(varName)
 			}
 			replacement = envVal
-		} else if idx := strings.Index(inner, ":|"); idx != -1 {
+		} else if idx := strings.Index(inner, ":,"); idx != -1 {
 			varName := inner[:idx]
 			allowed := inner[idx+2:]
 			envVal := os.Getenv(varName)
-			options := strings.Split(allowed, "|")
+			options := strings.Split(allowed, ",")
 			valid := false
 			for _, opt := range options {
 				if envVal == opt {

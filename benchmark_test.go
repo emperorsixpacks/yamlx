@@ -78,7 +78,7 @@ func BenchmarkUnmarshalEnumValidation(b *testing.B) {
 	defer os.Unsetenv("BENCH_ENV")
 
 	yml := []byte(`
-env: ${BENCH_ENV:|production|staging|development}
+env: ${BENCH_ENV:,production,staging,development}
 `)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -130,7 +130,7 @@ port: !if "$env" == "production" 443 else 8080
 log: !if "$env" == "production" warn else debug
 network: !include network.yaml
 db: ${BENCH_DB:?}
-mode: ${APP_ENV:|production|staging|development}
+mode: ${APP_ENV:,production,staging,development}
 `)
 
 	origDir, _ := os.Getwd()

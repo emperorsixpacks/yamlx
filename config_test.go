@@ -476,7 +476,7 @@ func TestEnumValidation(t *testing.T) {
 	t.Run("valid value passes", func(t *testing.T) {
 		os.Setenv("APP_ENV", "production")
 		defer os.Unsetenv("APP_ENV")
-		yml := []byte(`env: ${APP_ENV:|production|staging|development}
+		yml := []byte(`env: ${APP_ENV:,production,staging,development}
 `)
 		var config struct {
 			Env string `yaml:"env"`
@@ -489,7 +489,7 @@ func TestEnumValidation(t *testing.T) {
 	t.Run("invalid value errors", func(t *testing.T) {
 		os.Setenv("APP_ENV", "invalid")
 		defer os.Unsetenv("APP_ENV")
-		yml := []byte(`env: ${APP_ENV:|production|staging|development}
+		yml := []byte(`env: ${APP_ENV:,production,staging,development}
 `)
 		var config struct {
 			Env string `yaml:"env"`
@@ -502,7 +502,7 @@ func TestEnumValidation(t *testing.T) {
 
 	t.Run("empty value errors", func(t *testing.T) {
 		os.Unsetenv("APP_ENV")
-		yml := []byte(`env: ${APP_ENV:|production|staging|development}
+		yml := []byte(`env: ${APP_ENV:,production,staging,development}
 `)
 		var config struct {
 			Env string `yaml:"env"`
@@ -515,7 +515,7 @@ func TestEnumValidation(t *testing.T) {
 	t.Run("single allowed value", func(t *testing.T) {
 		os.Setenv("MODE", "prod")
 		defer os.Unsetenv("MODE")
-		yml := []byte(`mode: ${MODE:|prod}
+		yml := []byte(`mode: ${MODE:,prod}
 `)
 		var config struct {
 			Mode string `yaml:"mode"`
