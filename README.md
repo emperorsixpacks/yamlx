@@ -174,6 +174,35 @@ settings: !include ./defaults.yaml
 
 ---
 
+## Validation
+
+Implement `Validate() error` on your struct and it runs automatically after unmarshalling:
+
+```go
+type Config struct {
+    Name string `yaml:"name"`
+    Port int    `yaml:"port"`
+}
+
+func (c Config) Validate() error {
+    if c.Name == "" {
+        return errors.New("name is required")
+    }
+    if c.Port < 1 || c.Port > 65535 {
+        return errors.New("port must be between 1 and 65535")
+    }
+    return nil
+}
+
+var cfg Config
+err := yamlx.Unmarshal(yml, &cfg)
+// err will be non-nil if validation fails
+```
+
+Validation runs **after** all env vars, includes, and conditionals are resolved. If your struct doesn't implement `Validate()`, it's simply skipped — zero overhead.
+
+---
+
 ## Processing Order
 
 ```
@@ -184,6 +213,7 @@ settings: !include ./defaults.yaml
 5. Resolve !include tags
 6. Resolve ${VAR} env substitution
 7. Unmarshal into Go struct
+8. Call Validate() if implemented
 ```
 
 ## Error Handling
