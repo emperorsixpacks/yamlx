@@ -49,7 +49,11 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 	}
 
 	if !cfg.skipVars {
-		resolveYamlVarRefs(&doc, vars)
+		pathVars := make(map[string]pathVar)
+		buildPathMap(&doc, "", "", pathVars)
+		if err := resolveYamlVarRefs(&doc, vars, pathVars, []string{}); err != nil {
+			return err
+		}
 	}
 
 	if !cfg.skipIncludes {

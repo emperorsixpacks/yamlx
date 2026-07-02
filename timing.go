@@ -49,7 +49,11 @@ func UnmarshalWithTiming(in []byte, o any, opts ...Option) (Timing, error) {
 
 	t4 := time.Now()
 	if !cfg.skipVars {
-		resolveYamlVarRefs(&doc, vars)
+		pathVars := make(map[string]pathVar)
+		buildPathMap(&doc, "", "", pathVars)
+		if err := resolveYamlVarRefs(&doc, vars, pathVars, []string{}); err != nil {
+			return t, err
+		}
 	}
 	t.VarRefs = time.Since(t4)
 

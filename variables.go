@@ -1,7 +1,9 @@
 package yamlx
 
 import (
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -49,34 +51,98 @@ func collectYamlVars(node *yaml.Node) map[string]string {
 	return vars
 }
 
-// resolveYamlVarRefs walks the AST and replaces $var references (not ${VAR}) with variable values.
-func resolveYamlVarRefs(node *yaml.Node, vars map[string]string) {
+// pathVar holds a scalar value accessible by dot-path and the first path segment
+// for constraint checking.
+type pathVar struct {
+	value        string
+	firstSegment string
+}
+
+// buildPathMap walks the AST and collects all scalar values with their dot-paths.
+func buildPathMap(node *yaml.Node, prefix string, firstSeg string, m map[string]pathVar) {
 	if node == nil {
 		return
+	}
+	switch node.Kind {
+	case yaml.DocumentNode:
+		for _, child := range node.Content {
+			buildPathMap(child, "", "", m)
+		}
+	case yaml.MappingNode:
+		for i := 0; i < len(node.Content); i += 2 {
+			key := node.Content[i]
+			val := node.Content[i+1]
+			path := key.Value
+			if prefix != "" {
+				path = prefix + "." + key.Value
+			}
+			seg := firstSeg
+			if seg == "" {
+				seg = key.Value
+			}
+			if val.Kind == yaml.ScalarNode {
+				m[path] = pathVar{value: val.Value, firstSegment: seg}
+			}
+			buildPathMap(val, path, seg, m)
+		}
+	case yaml.SequenceNode:
+		for j, child := range node.Content {
+			path := prefix + "." + strconv.Itoa(j)
+			if child.Kind == yaml.ScalarNode {
+				m[path] = pathVar{value: child.Value, firstSegment: firstSeg}
+			}
+			buildPathMap(child, path, firstSeg, m)
+		}
+	}
+}
+
+// resolveYamlVarRefs walks the AST and replaces $var references (not ${VAR}) with variable values.
+// currentPath tracks the ancestor mapping keys to enforce that dot-path references cannot be
+// used from inside the target root's subtree.
+func resolveYamlVarRefs(node *yaml.Node, vars map[string]string, pathVars map[string]pathVar, currentPath []string) error {
+	if node == nil {
+		return nil
 	}
 
 	switch node.Kind {
 	case yaml.DocumentNode:
 		for _, child := range node.Content {
-			resolveYamlVarRefs(child, vars)
+			if err := resolveYamlVarRefs(child, vars, pathVars, currentPath); err != nil {
+				return err
+			}
 		}
 	case yaml.MappingNode:
 		for i := 0; i < len(node.Content); i += 2 {
-			resolveYamlVarRefs(node.Content[i+1], vars)
+			key := node.Content[i]
+			val := node.Content[i+1]
+			newPath := append(currentPath, key.Value)
+			if err := resolveYamlVarRefs(val, vars, pathVars, newPath); err != nil {
+				return err
+			}
 		}
 	case yaml.SequenceNode:
-		for _, child := range node.Content {
-			resolveYamlVarRefs(child, vars)
+		for j, child := range node.Content {
+			newPath := append(currentPath, strconv.Itoa(j))
+			if err := resolveYamlVarRefs(child, vars, pathVars, newPath); err != nil {
+				return err
+			}
 		}
 	case yaml.ScalarNode:
 		if node.Tag == "!!str" && strings.Contains(node.Value, "$") {
-			node.Value = replaceYamlVars(node.Value, vars)
+			resolved, err := replaceYamlVars(node.Value, vars, pathVars, currentPath)
+			if err != nil {
+				return err
+			}
+			node.Value = resolved
 		}
 	}
+	return nil
 }
 
 // replaceYamlVars replaces $var references with variable values, skipping ${...} (env var syntax).
-func replaceYamlVars(s string, vars map[string]string) string {
+// It also supports dot-path references like $storage.database.port with a depth constraint:
+// the reference must not be used from inside the subtree of the path's first segment.
+func replaceYamlVars(s string, vars map[string]string, pathVars map[string]pathVar, currentPath []string) (string, error) {
 	var result strings.Builder
 	i := 0
 	for i < len(s) {
@@ -92,19 +158,34 @@ func replaceYamlVars(s string, vars map[string]string) string {
 				i += closeIdx + 1
 				continue
 			}
-			// extract $var name
+			// extract $var name, allowing dots for path references
 			end := i + 1
 			for end < len(s) {
 				c := s[end]
-				if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+				if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
 					end++
 				} else {
 					break
 				}
 			}
 			varName := s[i+1 : end]
-			if val, ok := vars[varName]; ok {
-				result.WriteString(val)
+			if strings.Contains(varName, ".") {
+				// dot path reference
+				if pv, ok := pathVars[varName]; ok {
+					if len(currentPath) > 0 && currentPath[0] == pv.firstSegment {
+						return "", fmt.Errorf("invalid reference: cannot use $%s from inside %s", varName, pv.firstSegment)
+					}
+					result.WriteString(pv.value)
+				} else {
+					// if not found, leave as-is (same behavior as simple $var)
+					result.WriteString("$")
+					result.WriteString(varName)
+				}
+			} else {
+				// simple variable reference
+				if val, ok := vars[varName]; ok {
+					result.WriteString(val)
+				}
 			}
 			i = end
 		} else {
@@ -112,5 +193,5 @@ func replaceYamlVars(s string, vars map[string]string) string {
 			i++
 		}
 	}
-	return result.String()
+	return result.String(), nil
 }

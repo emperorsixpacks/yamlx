@@ -634,3 +634,170 @@ port: 8080
 		assert.Equal(t, "default", cfg.Name)
 	})
 }
+
+func TestDotPathVars(t *testing.T) {
+	t.Run("basic dot path reference", func(t *testing.T) {
+		yml := []byte(`storage:
+  database:
+    port: 5432
+indexer:
+  db_port: $storage.database.port
+`)
+		var config struct {
+			Storage struct {
+				Database struct {
+					Port int `yaml:"port"`
+				} `yaml:"database"`
+			} `yaml:"storage"`
+			Indexer struct {
+				DBPort string `yaml:"db_port"`
+			} `yaml:"indexer"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "5432", config.Indexer.DBPort)
+	})
+
+	t.Run("multiple dot path references", func(t *testing.T) {
+		yml := []byte(`storage:
+  redis:
+    redis_port: 6379
+    redis_host: redis
+  database:
+    database_port: 5432
+    database_host: postgres
+indexer:
+  redis_port: $storage.redis.redis_port
+  redis_host: $storage.redis.redis_host
+  db_port: $storage.database.database_port
+  db_host: $storage.database.database_host
+`)
+		var config struct {
+			Storage struct {
+				Redis struct {
+					Port int    `yaml:"redis_port"`
+					Host string `yaml:"redis_host"`
+				} `yaml:"redis"`
+				Database struct {
+					Port int    `yaml:"database_port"`
+					Host string `yaml:"database_host"`
+				} `yaml:"database"`
+			} `yaml:"storage"`
+			Indexer struct {
+				RedisPort string `yaml:"redis_port"`
+				RedisHost string `yaml:"redis_host"`
+				DBPort    string `yaml:"db_port"`
+				DBHost    string `yaml:"db_host"`
+			} `yaml:"indexer"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "6379", config.Indexer.RedisPort)
+		assert.Equal(t, "redis", config.Indexer.RedisHost)
+		assert.Equal(t, "5432", config.Indexer.DBPort)
+		assert.Equal(t, "postgres", config.Indexer.DBHost)
+	})
+
+	t.Run("dot path with env vars in referenced value", func(t *testing.T) {
+		os.Setenv("REDIS_PORT", "6380")
+		defer os.Unsetenv("REDIS_PORT")
+		yml := []byte(`storage:
+  redis:
+    redis_port: ${REDIS_PORT:-6379}
+indexer:
+  redis_port: $storage.redis.redis_port
+`)
+		var config struct {
+			Storage struct {
+				Redis struct {
+					Port string `yaml:"redis_port"`
+				} `yaml:"redis"`
+			} `yaml:"storage"`
+			Indexer struct {
+				RedisPort string `yaml:"redis_port"`
+			} `yaml:"indexer"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "6380", config.Indexer.RedisPort)
+	})
+
+	t.Run("dot path from same level sibling is allowed", func(t *testing.T) {
+		yml := []byte(`a:
+  x: 1
+b:
+  y: $a.x
+`)
+		var config struct {
+			A struct {
+				X int `yaml:"x"`
+			} `yaml:"a"`
+			B struct {
+				Y string `yaml:"y"`
+			} `yaml:"b"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "1", config.B.Y)
+	})
+
+	t.Run("dot path from inside target subtree errors", func(t *testing.T) {
+		yml := []byte(`storage:
+  database:
+    port: 5432
+  cache:
+    fallback: $storage.database.port
+`)
+		var config map[string]any
+		err := Unmarshal(yml, &config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid reference")
+	})
+
+	t.Run("deeply nested dot path from inside target errors", func(t *testing.T) {
+		yml := []byte(`storage:
+  database:
+    port: 5432
+    deep:
+      ref: $storage.database.port
+`)
+		var config map[string]any
+		err := Unmarshal(yml, &config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid reference")
+	})
+
+	t.Run("dot path in sequence item from sibling is allowed", func(t *testing.T) {
+		yml := []byte(`storage:
+  port: 5432
+items:
+  - $storage.port
+`)
+		var config struct {
+			Storage struct {
+				Port int `yaml:"port"`
+			} `yaml:"storage"`
+			Items []string `yaml:"items"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Len(t, config.Items, 1)
+		assert.Equal(t, "5432", config.Items[0])
+	})
+
+	t.Run("dot path leaves unknown paths as-is", func(t *testing.T) {
+		yml := []byte(`storage:
+  port: 5432
+indexer:
+  bad: $storage.nonexistent.path
+`)
+		var config struct {
+			Indexer struct {
+				Bad string `yaml:"bad"`
+			} `yaml:"indexer"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "$storage.nonexistent.path", config.Indexer.Bad)
+	})
+}
