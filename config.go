@@ -15,6 +15,14 @@ type Validator interface {
 	Validate() error
 }
 
+// EnvLoader is an interface that types can implement to load environment
+// variables before ${VAR} placeholders are resolved. If the target implements
+// EnvLoader, Unmarshal will call LoadEnv() automatically before env substitution.
+// Typical use: read a .env file with os.Setenv calls so ${VAR} resolves correctly.
+type EnvLoader interface {
+	LoadEnv() error
+}
+
 // Unmarshal takes a YAML byte slice `in` and unmarshals it into the object `o`.
 // Processing order:
 //  1. Extract $var definitions from raw bytes
@@ -22,9 +30,10 @@ type Validator interface {
 //  3. Parse YAML into AST
 //  4. Resolve $var references
 //  5. Resolve !include tags
-//  6. Resolve ${VAR} env substitution (directly on AST)
-//  7. Unmarshal into target struct
-//  8. Call Validate() if implemented
+//  6. Call LoadEnv() if implemented
+//  7. Resolve ${VAR} env substitution (directly on AST)
+//  8. Unmarshal into target struct
+//  9. Call Validate() if implemented
 func Unmarshal(in []byte, o any, opts ...Option) error {
 	cfg := defaultConfig()
 	for _, opt := range opts {
@@ -60,6 +69,12 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 
 	if !cfg.skipIncludes {
 		if err := resolveIncludes(&doc); err != nil {
+			return err
+		}
+	}
+
+	if v, ok := o.(EnvLoader); ok {
+		if err := v.LoadEnv(); err != nil {
 			return err
 		}
 	}

@@ -14,6 +14,7 @@ type Timing struct {
 	YAMLParse    time.Duration
 	VarRefs      time.Duration
 	Includes     time.Duration
+	LoadEnv      time.Duration
 	EnvVars      time.Duration
 	FinalParse   time.Duration
 }
@@ -68,18 +69,26 @@ func UnmarshalWithTiming(in []byte, o any, opts ...Option) (Timing, error) {
 	t.Includes = time.Since(t5)
 
 	t6 := time.Now()
+	if v, ok := o.(EnvLoader); ok {
+		if err := v.LoadEnv(); err != nil {
+			return t, err
+		}
+	}
+	t.LoadEnv = time.Since(t6)
+
+	t7 := time.Now()
 	if !cfg.skipEnvVars {
 		if err := resolveEnvVars(&doc); err != nil {
 			return t, err
 		}
 	}
-	t.EnvVars = time.Since(t6)
+	t.EnvVars = time.Since(t7)
 
-	t7 := time.Now()
+	t8 := time.Now()
 	if err := yaml.Unmarshal(nodeToBytes(&doc), o); err != nil {
 		return t, err
 	}
-	t.FinalParse = time.Since(t7)
+	t.FinalParse = time.Since(t8)
 
 	if v, ok := o.(Validator); ok {
 		if err := v.Validate(); err != nil {
