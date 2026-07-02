@@ -7,6 +7,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Validator is an interface that types can implement to validate themselves
+// after unmarshalling. If the target implements Validator, Unmarshal will
+// call Validate() automatically after parsing is complete.
+type Validator interface {
+	Validate() error
+}
+
 // Unmarshal takes a YAML byte slice `in` and unmarshals it into the object `o`.
 // Processing order:
 //  1. Extract $var definitions from raw bytes
@@ -16,6 +23,7 @@ import (
 //  5. Resolve !include tags
 //  6. Resolve ${VAR} env substitution (directly on AST)
 //  7. Unmarshal into target struct
+//  8. Call Validate() if implemented
 func Unmarshal(in []byte, o any) error {
 	vars := extractRawVars(in)
 	out := preprocessIf(in, vars)
@@ -35,7 +43,15 @@ func Unmarshal(in []byte, o any) error {
 		return err
 	}
 
-	return yaml.Unmarshal(nodeToBytes(&doc), o)
+	if err := yaml.Unmarshal(nodeToBytes(&doc), o); err != nil {
+		return err
+	}
+
+	if v, ok := o.(Validator); ok {
+		return v.Validate()
+	}
+
+	return nil
 }
 
 // nodeToBytes marshals a yaml.Node back to bytes for final unmarshalling.

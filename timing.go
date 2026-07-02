@@ -61,6 +61,12 @@ func UnmarshalWithTiming(in []byte, o any) (Timing, error) {
 	}
 	t.FinalParse = time.Since(t7)
 
+	if v, ok := o.(Validator); ok {
+		if err := v.Validate(); err != nil {
+			return t, err
+		}
+	}
+
 	t.Total = time.Since(start)
 	return t, nil
 }

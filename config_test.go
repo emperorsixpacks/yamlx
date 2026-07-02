@@ -543,3 +543,94 @@ port: 8080
 	assert.True(t, timing.YAMLParse > 0, "yaml parse time should be > 0")
 	assert.True(t, timing.FinalParse > 0, "final parse time should be > 0")
 }
+
+type validConfig struct {
+	Name string `yaml:"name"`
+	Port int    `yaml:"port"`
+}
+
+func (c validConfig) Validate() error {
+	if c.Name == "" {
+		return NewConfigError("name is required")
+	}
+	if c.Port < 1 || c.Port > 65535 {
+		return NewConfigError("port must be between 1 and 65535")
+	}
+	return nil
+}
+
+type noValidatorConfig struct {
+	Name string `yaml:"name"`
+}
+
+func TestValidator(t *testing.T) {
+	t.Run("valid config passes", func(t *testing.T) {
+		yml := []byte(`name: myapp
+port: 8080
+`)
+		var cfg validConfig
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, "myapp", cfg.Name)
+		assert.Equal(t, 8080, cfg.Port)
+	})
+
+	t.Run("empty name fails validation", func(t *testing.T) {
+		yml := []byte(`name: ""
+port: 8080
+`)
+		var cfg validConfig
+		err := Unmarshal(yml, &cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "name is required")
+	})
+
+	t.Run("invalid port fails validation", func(t *testing.T) {
+		yml := []byte(`name: myapp
+port: 99999
+`)
+		var cfg validConfig
+		err := Unmarshal(yml, &cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "port must be between 1 and 65535")
+	})
+
+	t.Run("struct without Validate skips validation", func(t *testing.T) {
+		yml := []byte(`name: myapp
+`)
+		var cfg noValidatorConfig
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, "myapp", cfg.Name)
+	})
+
+	t.Run("validator runs with env vars resolved", func(t *testing.T) {
+		os.Setenv("APP_NAME", "prod-app")
+		defer os.Unsetenv("APP_NAME")
+		yml := []byte(`name: ${APP_NAME}
+port: 443
+`)
+		var cfg validConfig
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, "prod-app", cfg.Name)
+	})
+
+	t.Run("validator runs after includes resolved", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.WriteFile(tmpDir+"/base.yaml", []byte(`name: included-app
+port: 3000
+`), 0644)
+		origDir, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origDir)
+
+		yml := []byte(`name: ${APP_NAME:-default}
+port: 8080
+`)
+		var cfg validConfig
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, "default", cfg.Name)
+	})
+}
