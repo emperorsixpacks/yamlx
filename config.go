@@ -237,7 +237,7 @@ func hasCustomDirectives(t reflect.Type) bool {
 		if tag == "" {
 			continue
 		}
-		for _, part := range strings.Split(tag, "|") {
+		for _, part := range strings.Split(tag, ",") {
 			part = strings.TrimSpace(part)
 			if isDirective(part) {
 				return true
