@@ -240,3 +240,26 @@ networks:
 		Unmarshal(yml, &cfg)
 	}
 }
+
+type benchEnvLoader struct {
+	Host string `yaml:"host"`
+}
+
+func (c *benchEnvLoader) LoadEnv() error {
+	os.Setenv("BENCH_LOADER_HOST", "from-loader")
+	return nil
+}
+
+func BenchmarkUnmarshalEnvLoader(b *testing.B) {
+	os.Unsetenv("BENCH_LOADER_HOST")
+	defer os.Unsetenv("BENCH_LOADER_HOST")
+
+	yml := []byte(`
+host: ${BENCH_LOADER_HOST}
+`)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var cfg benchEnvLoader
+		Unmarshal(yml, &cfg)
+	}
+}
