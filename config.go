@@ -50,8 +50,10 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 
 	if !cfg.skipVars {
 		pathVars := make(map[string]pathVar)
-		buildPathMap(&doc, "", "", pathVars)
-		if err := resolveYamlVarRefs(&doc, vars, pathVars, []string{}); err != nil {
+		if hasDotPathRefs(&doc) {
+			buildPathMap(&doc, nil, 0, pathVars)
+		}
+		if _, err := resolveYamlVarRefs(&doc, vars, pathVars, nil, 0); err != nil {
 			return err
 		}
 	}

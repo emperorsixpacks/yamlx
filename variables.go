@@ -58,92 +58,160 @@ type pathVar struct {
 	firstSegment string
 }
 
-// buildPathMap walks the AST and collects all scalar values with their dot-paths.
-func buildPathMap(node *yaml.Node, prefix string, firstSeg string, m map[string]pathVar) {
+// hasDotPathRefs scans the AST for any $a.b.c style references.
+func hasDotPathRefs(node *yaml.Node) bool {
 	if node == nil {
-		return
+		return false
 	}
 	switch node.Kind {
-	case yaml.DocumentNode:
+	case yaml.DocumentNode, yaml.MappingNode, yaml.SequenceNode:
 		for _, child := range node.Content {
-			buildPathMap(child, "", "", m)
+			if hasDotPathRefs(child) {
+				return true
+			}
 		}
-	case yaml.MappingNode:
-		for i := 0; i < len(node.Content); i += 2 {
-			key := node.Content[i]
-			val := node.Content[i+1]
-			path := key.Value
-			if prefix != "" {
-				path = prefix + "." + key.Value
-			}
-			seg := firstSeg
-			if seg == "" {
-				seg = key.Value
-			}
-			if val.Kind == yaml.ScalarNode {
-				m[path] = pathVar{value: val.Value, firstSegment: seg}
-			}
-			buildPathMap(val, path, seg, m)
+	case yaml.ScalarNode:
+		if node.Tag != "!!str" {
+			return false
 		}
-	case yaml.SequenceNode:
-		for j, child := range node.Content {
-			path := prefix + "." + strconv.Itoa(j)
-			if child.Kind == yaml.ScalarNode {
-				m[path] = pathVar{value: child.Value, firstSegment: firstSeg}
+		v := node.Value
+		for i := 0; i < len(v); i++ {
+			if v[i] == '$' {
+				if i+1 < len(v) && v[i+1] == '{' {
+					continue
+				}
+				end := i + 1
+				sawDot := false
+				for end < len(v) {
+					c := v[end]
+					if c == '.' {
+						sawDot = true
+						end++
+						continue
+					}
+					if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+						end++
+					} else {
+						break
+					}
+				}
+				if sawDot {
+					return true
+				}
+				i = end - 1
 			}
-			buildPathMap(child, path, firstSeg, m)
 		}
 	}
+	return false
 }
 
-// resolveYamlVarRefs walks the AST and replaces $var references (not ${VAR}) with variable values.
-// currentPath tracks the ancestor mapping keys to enforce that dot-path references cannot be
-// used from inside the target root's subtree.
-func resolveYamlVarRefs(node *yaml.Node, vars map[string]string, pathVars map[string]pathVar, currentPath []string) error {
+// buildPathMap walks the AST and collects all scalar values with their dot-paths.
+// Uses a single reusable stack slice to avoid allocations.
+func buildPathMap(node *yaml.Node, stack []string, depth int, m map[string]pathVar) []string {
 	if node == nil {
-		return nil
+		return stack
+	}
+	switch node.Kind {
+	case yaml.DocumentNode:
+		for _, child := range node.Content {
+			stack = buildPathMap(child, stack, depth, m)
+		}
+	case yaml.MappingNode:
+		for i := 0; i < len(node.Content); i += 2 {
+			key := node.Content[i]
+			val := node.Content[i+1]
+			stack = pushStack(stack, depth, key.Value)
+
+			firstSeg := key.Value
+			if depth > 0 {
+				firstSeg = stack[0]
+			}
+			if val.Kind == yaml.ScalarNode {
+				path := strings.Join(stack[:depth+1], ".")
+				m[path] = pathVar{value: val.Value, firstSegment: firstSeg}
+			}
+			stack = buildPathMap(val, stack, depth+1, m)
+		}
+	case yaml.SequenceNode:
+		for j, child := range node.Content {
+			seg := strconv.Itoa(j)
+			stack = pushStack(stack, depth, seg)
+
+			firstSeg := ""
+			if depth > 0 {
+				firstSeg = stack[0]
+			}
+			if child.Kind == yaml.ScalarNode {
+				path := strings.Join(stack[:depth+1], ".")
+				m[path] = pathVar{value: child.Value, firstSegment: firstSeg}
+			}
+			stack = buildPathMap(child, stack, depth+1, m)
+		}
+	}
+	return stack
+}
+
+func pushStack(stack []string, depth int, val string) []string {
+	if depth < len(stack) {
+		stack[depth] = val
+		return stack
+	}
+	return append(stack, val)
+}
+
+// resolveYamlVarRefs walks the AST and replaces $var references with variable values.
+// Uses a single reusable stack slice to avoid per-call allocations.
+func resolveYamlVarRefs(node *yaml.Node, vars map[string]string, pathVars map[string]pathVar, stack []string, depth int) ([]string, error) {
+	if node == nil {
+		return stack, nil
 	}
 
 	switch node.Kind {
 	case yaml.DocumentNode:
 		for _, child := range node.Content {
-			if err := resolveYamlVarRefs(child, vars, pathVars, currentPath); err != nil {
-				return err
+			var err error
+			stack, err = resolveYamlVarRefs(child, vars, pathVars, stack, depth)
+			if err != nil {
+				return stack, err
 			}
 		}
 	case yaml.MappingNode:
 		for i := 0; i < len(node.Content); i += 2 {
 			key := node.Content[i]
 			val := node.Content[i+1]
-			newPath := append(currentPath, key.Value)
-			if err := resolveYamlVarRefs(val, vars, pathVars, newPath); err != nil {
-				return err
+			stack = pushStack(stack, depth, key.Value)
+			var err error
+			stack, err = resolveYamlVarRefs(val, vars, pathVars, stack, depth+1)
+			if err != nil {
+				return stack, err
 			}
 		}
 	case yaml.SequenceNode:
 		for j, child := range node.Content {
-			newPath := append(currentPath, strconv.Itoa(j))
-			if err := resolveYamlVarRefs(child, vars, pathVars, newPath); err != nil {
-				return err
+			stack = pushStack(stack, depth, strconv.Itoa(j))
+			var err error
+			stack, err = resolveYamlVarRefs(child, vars, pathVars, stack, depth+1)
+			if err != nil {
+				return stack, err
 			}
 		}
 	case yaml.ScalarNode:
 		if node.Tag == "!!str" && strings.Contains(node.Value, "$") {
-			resolved, err := replaceYamlVars(node.Value, vars, pathVars, currentPath)
+			resolved, err := replaceYamlVars(node.Value, vars, pathVars, stack[:depth])
 			if err != nil {
-				return err
+				return stack, err
 			}
 			node.Value = resolved
 		}
 	}
-	return nil
+	return stack, nil
 }
 
 // replaceYamlVars replaces $var references with variable values, skipping ${...} (env var syntax).
-// It also supports dot-path references like $storage.database.port with a depth constraint:
-// the reference must not be used from inside the subtree of the path's first segment.
+// It also supports dot-path references like $storage.database.port with a depth constraint.
 func replaceYamlVars(s string, vars map[string]string, pathVars map[string]pathVar, currentPath []string) (string, error) {
 	var result strings.Builder
+	result.Grow(len(s))
 	i := 0
 	for i < len(s) {
 		if s[i] == '$' {
@@ -160,16 +228,22 @@ func replaceYamlVars(s string, vars map[string]string, pathVars map[string]pathV
 			}
 			// extract $var name, allowing dots for path references
 			end := i + 1
+			sawDot := false
 			for end < len(s) {
 				c := s[end]
-				if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
+				if c == '.' {
+					sawDot = true
+					end++
+					continue
+				}
+				if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
 					end++
 				} else {
 					break
 				}
 			}
 			varName := s[i+1 : end]
-			if strings.Contains(varName, ".") {
+			if sawDot {
 				// dot path reference
 				if pv, ok := pathVars[varName]; ok {
 					if len(currentPath) > 0 && currentPath[0] == pv.firstSegment {
@@ -177,8 +251,8 @@ func replaceYamlVars(s string, vars map[string]string, pathVars map[string]pathV
 					}
 					result.WriteString(pv.value)
 				} else {
-					// if not found, leave as-is (same behavior as simple $var)
-					result.WriteString("$")
+					// not found, leave as-is
+					result.WriteByte('$')
 					result.WriteString(varName)
 				}
 			} else {
