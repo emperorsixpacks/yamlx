@@ -24,23 +24,43 @@ type Validator interface {
 //  6. Resolve ${VAR} env substitution (directly on AST)
 //  7. Unmarshal into target struct
 //  8. Call Validate() if implemented
-func Unmarshal(in []byte, o any) error {
+func Unmarshal(in []byte, o any, opts ...Option) error {
+	cfg := defaultConfig()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	vars := extractRawVars(in)
-	out := preprocessIf(in, vars)
+
+	// Merge extra vars from WithVars option
+	for k, v := range cfg.extraVars {
+		vars[k] = v
+	}
+
+	out := in
+	if !cfg.skipIf {
+		out = preprocessIf(in, vars)
+	}
 
 	var doc yaml.Node
 	if err := yaml.Unmarshal(out, &doc); err != nil {
 		return err
 	}
 
-	resolveYamlVarRefs(&doc, vars)
-
-	if err := resolveIncludes(&doc); err != nil {
-		return err
+	if !cfg.skipVars {
+		resolveYamlVarRefs(&doc, vars)
 	}
 
-	if err := resolveEnvVars(&doc); err != nil {
-		return err
+	if !cfg.skipIncludes {
+		if err := resolveIncludes(&doc); err != nil {
+			return err
+		}
+	}
+
+	if !cfg.skipEnvVars {
+		if err := resolveEnvVars(&doc); err != nil {
+			return err
+		}
 	}
 
 	if err := yaml.Unmarshal(nodeToBytes(&doc), o); err != nil {

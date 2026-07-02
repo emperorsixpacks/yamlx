@@ -20,7 +20,12 @@ type Timing struct {
 
 // UnmarshalWithTiming works like Unmarshal but also returns timing information
 // for each processing phase.
-func UnmarshalWithTiming(in []byte, o any) (Timing, error) {
+func UnmarshalWithTiming(in []byte, o any, opts ...Option) (Timing, error) {
+	cfg := defaultConfig()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	var t Timing
 	start := time.Now()
 
@@ -29,7 +34,10 @@ func UnmarshalWithTiming(in []byte, o any) (Timing, error) {
 	t.ExtractVars = time.Since(t1)
 
 	t2 := time.Now()
-	out := preprocessIf(in, vars)
+	out := in
+	if !cfg.skipIf {
+		out = preprocessIf(in, vars)
+	}
 	t.IfPreprocess = time.Since(t2)
 
 	t3 := time.Now()
@@ -40,18 +48,24 @@ func UnmarshalWithTiming(in []byte, o any) (Timing, error) {
 	t.YAMLParse = time.Since(t3)
 
 	t4 := time.Now()
-	resolveYamlVarRefs(&doc, vars)
+	if !cfg.skipVars {
+		resolveYamlVarRefs(&doc, vars)
+	}
 	t.VarRefs = time.Since(t4)
 
 	t5 := time.Now()
-	if err := resolveIncludes(&doc); err != nil {
-		return t, err
+	if !cfg.skipIncludes {
+		if err := resolveIncludes(&doc); err != nil {
+			return t, err
+		}
 	}
 	t.Includes = time.Since(t5)
 
 	t6 := time.Now()
-	if err := resolveEnvVars(&doc); err != nil {
-		return t, err
+	if !cfg.skipEnvVars {
+		if err := resolveEnvVars(&doc); err != nil {
+			return t, err
+		}
 	}
 	t.EnvVars = time.Since(t6)
 
