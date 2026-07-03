@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-07-02
+## [1.2.0] - 2026-07-02
+
+### Added
+
+- **`!env` directive** — load `.env` files directly in YAML using `joho/godotenv`. Place `!env ./.env` at the top of your YAML to load env vars before `${VAR}` resolution. Multiple `!env` lines supported.
 
 ### Added
 
@@ -37,5 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Functional options: `SkipEnvVars()`, `SkipValidation()`, `WithVars()`, `SkipIf()`, `SkipIncludes()`
 - `UnmarshalWithTiming` for per-phase performance tracking
 
-[Unreleased]: https://github.com/emperorsixpacks/yamlx/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/emperorsixpacks/yamlx/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/emperorsixpacks/yamlx/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/emperorsixpacks/yamlx/compare/v1.0.3...v1.1.0
