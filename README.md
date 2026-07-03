@@ -94,6 +94,19 @@ If `APP_ENV` is `invalid`, you get:
 invalid value "invalid" for variable APP_ENV: must be one of [production|staging|development]
 ```
 
+### Load Env Files `!env`
+
+Load a `.env` file at the top of your YAML. Env vars are set via `os.Setenv` before `${VAR}` resolution:
+
+```yaml
+!env ./.env
+!env ./secrets.env
+db_host: ${DB_HOST}
+db_port: ${DB_PORT}
+```
+
+Uses [joho/godotenv](https://github.com/joho/godotenv) under the hood — never sends env vars to a server, reads from local files only.
+
 ### Inline Variables `$var`
 
 Define a key in your YAML and reference it below:
@@ -260,15 +273,16 @@ err := yamlx.Unmarshal(yml, &cfg)
 ## Processing Order
 
 ```
-1. Extract $var definitions from raw bytes
-2. Preprocess !if conditionals
-3. Parse YAML into AST
-4. Resolve $var and $a.b.c dot-path references
-5. Resolve !include tags
-6. Call LoadEnv() if implemented
-7. Resolve ${VAR} env substitution
-8. Unmarshal into Go struct
-9. Call Validate() if implemented
+ 1. Extract $var definitions from raw bytes
+ 2. Preprocess !if conditionals
+ 3. Load !env files (godotenv)
+ 4. Parse YAML into AST
+ 5. Resolve $var and $a.b.c dot-path references
+ 6. Resolve !include tags
+ 7. Call LoadEnv() if implemented
+ 8. Resolve ${VAR} env substitution
+ 9. Unmarshal into Go struct
+10. Call Validate() if implemented
 ```
 
 ## Error Handling
