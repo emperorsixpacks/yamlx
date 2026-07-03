@@ -2,14 +2,11 @@ package yamlx
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
-
-var rawVarPattern = regexp.MustCompile(`^(\w+)\s*:\s*(.+)$`)
 
 // extractRawVars extracts simple key: value pairs from raw YAML bytes.
 // Used before YAML parsing to make variables available for !if conditionals.

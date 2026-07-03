@@ -3,11 +3,8 @@ package yamlx
 import (
 	"bytes"
 	"os"
-	"regexp"
 	"strings"
 )
-
-var ifPattern = regexp.MustCompile(`!if\s+"([^"]+)"\s*(==|!=)\s+"([^"]+)"\s+(.+?)\s+else\s+(.+)`)
 
 // preprocessIf resolves !if conditionals in raw YAML bytes before parsing.
 // Syntax: key: !if "$var" == "value" true_val else false_val
