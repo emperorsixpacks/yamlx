@@ -54,7 +54,7 @@ func resolveIncludesWalk(node *yaml.Node, basePath string, seen map[string]bool,
 		}
 
 	case yaml.ScalarNode:
-		if node.Tag == "!include" {
+		if node.Tag == TagInclude {
 			return resolveIncludeNode(node, basePath, seen, depth, maxDepth)
 		}
 	}
@@ -71,11 +71,11 @@ func resolveIncludeNode(node *yaml.Node, basePath string, seen map[string]bool, 
 	rawPath := node.Value
 	var incPath, mode, fallback string
 
-	if idx := strings.Index(rawPath, ":-"); idx != -1 {
+	if idx := strings.Index(rawPath, DelimDefault); idx != -1 {
 		incPath = rawPath[:idx]
 		mode = "default"
-		fallback = rawPath[idx+2:]
-	} else if idx := strings.Index(rawPath, ":?"); idx != -1 {
+		fallback = rawPath[idx+len(DelimDefault):]
+	} else if idx := strings.Index(rawPath, DelimRequired); idx != -1 {
 		incPath = rawPath[:idx]
 		mode = "required"
 	} else {

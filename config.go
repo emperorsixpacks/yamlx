@@ -156,13 +156,13 @@ func resolveEnvVars(node *yaml.Node) error {
 // resolvePlaceHolder checks if a string contains a placeholder of the form ${VAR},
 // ${VAR:-default}, ${VAR:?}, or ${VAR:|opt1|opt2} and resolves it.
 func resolvePlaceHolder(value string) (string, error) {
-	if !strings.Contains(value, "${") {
+	if !strings.Contains(value, DelimEnv) {
 		return value, nil
 	}
 
 	result := value
 	for {
-		start := strings.Index(result, "${")
+		start := strings.Index(result, DelimEnv)
 		if start == -1 {
 			break
 		}
@@ -176,25 +176,25 @@ func resolvePlaceHolder(value string) (string, error) {
 
 		var replacement string
 
-		if idx := strings.Index(inner, ":-"); idx != -1 {
+		if idx := strings.Index(inner, DelimDefault); idx != -1 {
 			varName := inner[:idx]
-			defaultVal := inner[idx+2:]
+			defaultVal := inner[idx+len(DelimDefault):]
 			envVal := os.Getenv(varName)
 			if envVal == "" {
 				replacement = defaultVal
 			} else {
 				replacement = envVal
 			}
-		} else if idx := strings.Index(inner, ":?"); idx != -1 {
+		} else if idx := strings.Index(inner, DelimRequired); idx != -1 {
 			varName := inner[:idx]
 			envVal := os.Getenv(varName)
 			if envVal == "" {
 				return "", NewRequiredError(varName)
 			}
 			replacement = envVal
-		} else if idx := strings.Index(inner, ":|"); idx != -1 {
+		} else if idx := strings.Index(inner, DelimEnum); idx != -1 {
 			varName := inner[:idx]
-			allowed := inner[idx+2:]
+			allowed := inner[idx+len(DelimEnum):]
 			envVal := os.Getenv(varName)
 			options := strings.Split(allowed, "|")
 			valid := false

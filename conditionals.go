@@ -14,7 +14,7 @@ var ifPattern = regexp.MustCompile(`!if\s+"([^"]+)"\s*(==|!=)\s+"([^"]+)"\s+(.+?
 func preprocessIf(in []byte, vars map[string]string) []byte {
 	lines := bytes.Split(in, []byte("\n"))
 	for i, line := range lines {
-		if !bytes.Contains(line, []byte("!if")) {
+		if !bytes.Contains(line, []byte(TagIf)) {
 			continue
 		}
 		resolved := resolveIfLine(string(line), vars)
@@ -26,13 +26,13 @@ func preprocessIf(in []byte, vars map[string]string) []byte {
 // resolveIfLine finds and resolves !if patterns in a single line.
 func resolveIfLine(line string, vars map[string]string) string {
 	for {
-		idx := strings.Index(line, "!if")
+		idx := strings.Index(line, TagIf)
 		if idx == -1 {
 			return line
 		}
 
-		rest := strings.TrimSpace(line[idx+3:])
-		match := ifPattern.FindStringSubmatch("!if " + rest)
+		rest := strings.TrimSpace(line[idx+len(TagIf):])
+		match := ifPattern.FindStringSubmatch(TagIf + " " + rest)
 		if match == nil {
 			return line
 		}
@@ -67,14 +67,14 @@ func resolveIfLine(line string, vars map[string]string) string {
 // resolveIfRef resolves a $var or ${VAR} reference.
 func resolveIfRef(s string, vars map[string]string) string {
 	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "$") && !strings.HasPrefix(s, "${") {
+	if strings.HasPrefix(s, DelimVar) && !strings.HasPrefix(s, DelimEnv) {
 		varName := s[1:]
 		if val, ok := vars[varName]; ok {
 			return val
 		}
 		return os.Getenv(varName)
 	}
-	if strings.HasPrefix(s, "${") && strings.HasSuffix(s, "}") {
+	if strings.HasPrefix(s, DelimEnv) && strings.HasSuffix(s, "}") {
 		varName := s[2 : len(s)-1]
 		return os.Getenv(varName)
 	}
