@@ -803,6 +803,64 @@ indexer:
 	})
 }
 
+func TestEnvFileDirective(t *testing.T) {
+	t.Run("loads .env file via !env tag", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.WriteFile(tmpDir+"/.env", []byte("ENV_HOST=from-dotenv\nENV_PORT=8080\n"), 0644)
+
+		origDir, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origDir)
+		defer os.Unsetenv("ENV_HOST")
+		defer os.Unsetenv("ENV_PORT")
+		os.Unsetenv("ENV_HOST")
+		os.Unsetenv("ENV_PORT")
+
+		yml := []byte(`!env ./.env
+db_host: ${ENV_HOST}
+db_port: ${ENV_PORT}
+`)
+		var config struct {
+			DBHost string `yaml:"db_host"`
+			DBPort string `yaml:"db_port"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "from-dotenv", config.DBHost)
+		assert.Equal(t, "8080", config.DBPort)
+	})
+
+	t.Run("!env runs before ${VAR} resolution", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.WriteFile(tmpDir+"/.env", []byte("MY_VAL=hello-world\n"), 0644)
+
+		origDir, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origDir)
+		defer os.Unsetenv("MY_VAL")
+		os.Unsetenv("MY_VAL")
+
+		yml := []byte(`!env ./.env
+result: ${MY_VAL}
+`)
+		var config struct {
+			Result string `yaml:"result"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "hello-world", config.Result)
+	})
+
+	t.Run("!env missing file returns error", func(t *testing.T) {
+		yml := []byte(`!env ./nonexistent.env
+name: test
+`)
+		var config map[string]any
+		err := Unmarshal(yml, &config)
+		assert.Error(t, err)
+	})
+}
+
 // envLoadingConfig implements EnvLoader to programmatically set env vars.
 type envLoadingConfig struct {
 	DBHost string `yaml:"db_host"`
