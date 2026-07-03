@@ -52,6 +52,11 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 		out = preprocessIf(in, vars)
 	}
 
+	out, envErr := preprocessEnvFiles(out)
+	if envErr != nil {
+		return envErr
+	}
+
 	var doc yaml.Node
 	if err := yaml.Unmarshal(out, &doc); err != nil {
 		return err

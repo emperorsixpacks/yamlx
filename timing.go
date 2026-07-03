@@ -11,6 +11,7 @@ type Timing struct {
 	Total        time.Duration
 	ExtractVars  time.Duration
 	IfPreprocess time.Duration
+	EnvFiles     time.Duration
 	YAMLParse    time.Duration
 	VarRefs      time.Duration
 	Includes     time.Duration
@@ -40,6 +41,13 @@ func UnmarshalWithTiming(in []byte, o any, opts ...Option) (Timing, error) {
 		out = preprocessIf(in, vars)
 	}
 	t.IfPreprocess = time.Since(t2)
+
+	t2b := time.Now()
+	out, envErr := preprocessEnvFiles(out)
+	if envErr != nil {
+		return t, envErr
+	}
+	t.EnvFiles = time.Since(t2b)
 
 	t3 := time.Now()
 	var doc yaml.Node
