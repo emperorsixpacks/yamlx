@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-07-09
+
+### Fixed
+
+- **Env Placeholder Resolution in Conditionals** — Supported resolving `${VAR}` environment variable placeholders inside dot-path and flat variables before conditional evaluation.
+
 ## [1.3.3] - 2026-07-09
 
 ### Fixed
@@ -65,7 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Functional options: `SkipEnvVars()`, `SkipValidation()`, `WithVars()`, `SkipIf()`, `SkipIncludes()`
 - `UnmarshalWithTiming` for per-phase performance tracking
 
-[Unreleased]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.3...HEAD
+[Unreleased]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.4...HEAD
+[1.3.4]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.0...v1.3.1

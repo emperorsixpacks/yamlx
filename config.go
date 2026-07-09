@@ -52,12 +52,19 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 	if err := yaml.Unmarshal(in, &tempDoc); err == nil {
 		tempVars := collectYamlVars(&tempDoc)
 		for k, v := range tempVars {
+			if resolved, err := resolvePlaceHolder(v); err == nil {
+				v = resolved
+			}
 			vars[k] = v
 		}
 		tempPathVars := make(map[string]pathVar)
 		buildPathMap(&tempDoc, nil, 0, tempPathVars)
 		for k, v := range tempPathVars {
-			vars[k] = v.value
+			val := v.value
+			if resolved, err := resolvePlaceHolder(val); err == nil {
+				val = resolved
+			}
+			vars[k] = val
 		}
 	}
 
