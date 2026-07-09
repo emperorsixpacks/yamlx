@@ -86,18 +86,18 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 		return err
 	}
 
+	if !cfg.skipIncludes {
+		if err := resolveIncludes(&doc); err != nil {
+			return err
+		}
+	}
+
 	if !cfg.skipVars {
 		pathVars := make(map[string]pathVar)
 		if hasDotPathRefs(&doc) {
 			buildPathMap(&doc, nil, 0, pathVars)
 		}
 		if _, err := resolveYamlVarRefs(&doc, vars, pathVars, nil, 0); err != nil {
-			return err
-		}
-	}
-
-	if !cfg.skipIncludes {
-		if err := resolveIncludes(&doc); err != nil {
 			return err
 		}
 	}
