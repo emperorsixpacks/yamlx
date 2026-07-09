@@ -404,7 +404,33 @@ func resolveNodeTypes(node *yaml.Node, t reflect.Type) {
 				keyNode := node.Content[i]
 				valNode := node.Content[i+1]
 				if field, ok := findStructField(t, keyNode.Value); ok {
-					resolveNodeTypes(valNode, field.Type)
+					isInline := false
+					tag := field.Tag.Get("yaml")
+					if tag != "" {
+						parts := strings.Split(tag, ",")
+						for _, p := range parts {
+							if strings.TrimSpace(p) == "inline" {
+								isInline = true
+								break
+							}
+						}
+					}
+
+					if isInline {
+						ft := field.Type
+						for ft.Kind() == reflect.Pointer {
+							ft = ft.Elem()
+						}
+						if ft.Kind() == reflect.Map {
+							resolveNodeTypes(valNode, ft.Elem())
+						} else if ft.Kind() == reflect.Struct {
+							if subField, ok := findStructField(ft, keyNode.Value); ok {
+								resolveNodeTypes(valNode, subField.Type)
+							}
+						}
+					} else {
+						resolveNodeTypes(valNode, field.Type)
+					}
 				}
 			}
 		} else if t.Kind() == reflect.Map {
@@ -448,9 +474,36 @@ func findStructField(t reflect.Type, key string) (reflect.StructField, bool) {
 	if t.Kind() != reflect.Struct {
 		return reflect.StructField{}, false
 	}
+	var inlineField *reflect.StructField
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		tag := f.Tag.Get("yaml")
+		
+		isInline := false
+		if tag != "" {
+			parts := strings.Split(tag, ",")
+			for _, p := range parts {
+				if strings.TrimSpace(p) == "inline" {
+					isInline = true
+					break
+				}
+			}
+		}
+
+		if isInline {
+			inlineField = &f
+			ft := f.Type
+			for ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct {
+				if _, ok := findStructField(ft, key); ok {
+					return f, true
+				}
+			}
+			continue
+		}
+
 		name := ""
 		if tag != "" {
 			parts := strings.Split(tag, ",")
@@ -466,5 +519,16 @@ func findStructField(t reflect.Type, key string) (reflect.StructField, bool) {
 			return f, true
 		}
 	}
+
+	if inlineField != nil {
+		ft := inlineField.Type
+		for ft.Kind() == reflect.Pointer {
+			ft = ft.Elem()
+		}
+		if ft.Kind() == reflect.Map {
+			return *inlineField, true
+		}
+	}
+
 	return reflect.StructField{}, false
 }

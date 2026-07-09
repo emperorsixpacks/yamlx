@@ -7,7 +7,19 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v3"
 )
+
+type TestCustomUnmarshalerType string
+
+func (t *TestCustomUnmarshalerType) UnmarshalYAML(value *yaml.Node) error {
+	var s string
+	if err := value.Decode(&s); err != nil {
+		return err
+	}
+	*t = TestCustomUnmarshalerType("custom-" + s)
+	return nil
+}
 
 // ClientSettings struct for testing
 type ClientSettings struct {
@@ -1165,6 +1177,91 @@ custom_flag: true
 		assert.Equal(t, NetworkType("testnet"), cfg.Network)
 		assert.Equal(t, false, cfg.Enabled)
 		assert.Equal(t, CustomBool(true), cfg.CustomFlag)
+	})
+
+	t.Run("custom type with unmarshaler and other custom directives", func(t *testing.T) {
+		type ConfigWithUnmarshaler struct {
+			NetType TestCustomUnmarshalerType `yaml:"network_type"`
+			Enabled bool                      `yaml:"enabled,default=true"`
+		}
+
+		yml := []byte(`
+network_type: evm
+enabled: false
+`)
+		var cfg ConfigWithUnmarshaler
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, TestCustomUnmarshalerType("custom-evm"), cfg.NetType)
+		assert.Equal(t, false, cfg.Enabled)
+	})
+
+	t.Run("custom type same field name and type name", func(t *testing.T) {
+		type NetworkType string
+		type ConfigWithSameName struct {
+			NetworkType NetworkType `yaml:"network_type"`
+			Enabled     bool        `yaml:"enabled,default=true"`
+		}
+
+		yml := []byte(`
+network_type: evm
+enabled: false
+`)
+		var cfg ConfigWithSameName
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, NetworkType("evm"), cfg.NetworkType)
+		assert.Equal(t, false, cfg.Enabled)
+	})
+
+	t.Run("custom type in inlined map struct", func(t *testing.T) {
+		type NetworkType string
+		type Token struct {
+			Symbol string `yaml:"symbol"`
+		}
+		type ChainConfig struct {
+			ChainID       int64       `yaml:"chain_id"`
+			RPC           string      `yaml:"rpc"`
+			Confirmations int         `yaml:"confirmations"`
+			NetworkType   NetworkType `yaml:"network_type"`
+			Tokens        []Token     `yaml:"tokens"`
+		}
+		type TokensConfig struct {
+			Chains map[string]ChainConfig `yaml:",inline"`
+		}
+		type AppConfig struct {
+			Env   string       `yaml:"env,required"`
+			Token TokensConfig `yaml:"token"`
+		}
+
+		yml := []byte(`
+env: prod
+token:
+  ethereum:
+    chain_id: 1
+    rpc: http://localhost:8545
+    confirmations: 12
+    network_type: evm
+    tokens:
+      - symbol: ETH
+  optimism:
+    chain_id: 10
+    rpc: http://localhost:8546
+    confirmations: 2
+    network_type: evm
+    tokens:
+      - symbol: OP
+`)
+		var cfg AppConfig
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, "prod", cfg.Env)
+		assert.Equal(t, 2, len(cfg.Token.Chains))
+		eth := cfg.Token.Chains["ethereum"]
+		assert.Equal(t, int64(1), eth.ChainID)
+		assert.Equal(t, NetworkType("evm"), eth.NetworkType)
+		assert.Equal(t, 1, len(eth.Tokens))
+		assert.Equal(t, "ETH", eth.Tokens[0].Symbol)
 	})
 }
 
