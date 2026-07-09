@@ -242,33 +242,115 @@ func unmarshalClean(data []byte, o any) error {
 
 	cleanVal := cleanPtr.Elem()
 	origVal := ptr.Elem()
-	for i := 0; i < cleanType.NumField(); i++ {
-		origVal.Field(i).Set(cleanVal.Field(i))
-	}
+	copyValue(origVal, cleanVal)
 
 	return nil
 }
 
 // hasCustomDirectives checks if a struct type has any custom yaml directives.
 func hasCustomDirectives(t reflect.Type) bool {
+	visited := make(map[reflect.Type]bool)
+	return hasCustomDirectivesRecursive(t, visited)
+}
+
+func hasCustomDirectivesRecursive(t reflect.Type, visited map[reflect.Type]bool) bool {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	if t.Kind() != reflect.Struct {
+	if visited[t] {
 		return false
 	}
+	visited[t] = true
 
-	for i := 0; i < t.NumField(); i++ {
-		tag := t.Field(i).Tag.Get("yaml")
-		if tag == "" {
-			continue
-		}
-		for _, part := range strings.Split(tag, ",") {
-			part = strings.TrimSpace(part)
-			if isDirective(part) {
+	switch t.Kind() {
+	case reflect.Slice, reflect.Array:
+		return hasCustomDirectivesRecursive(t.Elem(), visited)
+	case reflect.Map:
+		return hasCustomDirectivesRecursive(t.Key(), visited) || hasCustomDirectivesRecursive(t.Elem(), visited)
+	case reflect.Struct:
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			tag := f.Tag.Get("yaml")
+			if tag != "" {
+				for _, part := range strings.Split(tag, ",") {
+					part = strings.TrimSpace(part)
+					if isDirective(part) {
+						return true
+					}
+				}
+			}
+			if hasCustomDirectivesRecursive(f.Type, visited) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func copyValue(dst, src reflect.Value) {
+	if !dst.CanSet() {
+		return
+	}
+
+	if src.Type().AssignableTo(dst.Type()) {
+		dst.Set(src)
+		return
+	}
+
+	switch dst.Kind() {
+	case reflect.Pointer:
+		if src.IsNil() {
+			dst.Set(reflect.Zero(dst.Type()))
+			return
+		}
+		if dst.IsNil() {
+			dst.Set(reflect.New(dst.Type().Elem()))
+		}
+		copyValue(dst.Elem(), src.Elem())
+
+	case reflect.Struct:
+		for i := 0; i < dst.NumField(); i++ {
+			copyValue(dst.Field(i), src.Field(i))
+		}
+
+	case reflect.Slice:
+		if src.IsNil() {
+			dst.Set(reflect.Zero(dst.Type()))
+			return
+		}
+		n := src.Len()
+		slice := reflect.MakeSlice(dst.Type(), n, n)
+		for i := 0; i < n; i++ {
+			copyValue(slice.Index(i), src.Index(i))
+		}
+		dst.Set(slice)
+
+	case reflect.Array:
+		n := src.Len()
+		for i := 0; i < n; i++ {
+			copyValue(dst.Index(i), src.Index(i))
+		}
+
+	case reflect.Map:
+		if src.IsNil() {
+			dst.Set(reflect.Zero(dst.Type()))
+			return
+		}
+		dst.Set(reflect.MakeMap(dst.Type()))
+		for _, key := range src.MapKeys() {
+			dstKey := reflect.New(dst.Type().Key()).Elem()
+			copyValue(dstKey, key)
+
+			val := src.MapIndex(key)
+			dstVal := reflect.New(dst.Type().Elem()).Elem()
+			copyValue(dstVal, val)
+
+			dst.SetMapIndex(dstKey, dstVal)
+		}
+
+	case reflect.Interface:
+		if src.IsValid() {
+			dst.Set(src)
+		}
+	}
 }

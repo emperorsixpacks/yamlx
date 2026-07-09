@@ -176,6 +176,50 @@ func TestWithVarsTag(t *testing.T) {
 	}
 }
 
+type EnvConfig struct {
+	Environment string `yaml:"environment,required,enum=dev|staging|prod"`
+}
+
+type StorageConfig struct {
+	Port int `yaml:"port,omitempty,default=5432"`
+}
+
+type AppConfig struct {
+	Env     EnvConfig     `yaml:"env"`
+	Storage StorageConfig `yaml:"storage"`
+}
+
+func TestNestedStructsCleaningAndValidation(t *testing.T) {
+	yml := `
+env:
+  environment: prod
+storage:
+  port: 0
+`
+	var cfg AppConfig
+	err := Unmarshal([]byte(yml), &cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Env.Environment != "prod" {
+		t.Errorf("expected Environment to be 'prod', got %q", cfg.Env.Environment)
+	}
+	if cfg.Storage.Port != 5432 {
+		t.Errorf("expected Storage Port to be defaulted to 5432, got %d", cfg.Storage.Port)
+	}
+
+	// Test validation error in nested struct
+	ymlInvalid := `
+env:
+  environment: invalid
+`
+	var cfgInvalid AppConfig
+	err = Unmarshal([]byte(ymlInvalid), &cfgInvalid)
+	if err == nil {
+		t.Fatal("expected error for invalid enum value in nested struct, got nil")
+	}
+}
+
 func isConfigError(err error) bool {
 	_, ok := err.(configError)
 	return ok

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-07-09
+
+### Fixed
+
+- **Recursive Nested Structs Cleaning & Validation** — Clean custom directives from yaml tags inside nested structs recursively before unmarshalling. Previously, only top-level fields were cleaned, causing yaml.v3 to panic on nested struct tags containing custom tags like `required` or `enum`.
+- **Recursive Struct Validation** — Recursively validate nested structs and container collections (pointers, slices, arrays, maps) to enforce directives of nested fields.
+
 ## [1.3.0] - 2026-07-02
 
 ### Added
@@ -45,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Functional options: `SkipEnvVars()`, `SkipValidation()`, `WithVars()`, `SkipIf()`, `SkipIncludes()`
 - `UnmarshalWithTiming` for per-phase performance tracking
 
-[Unreleased]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/emperorsixpacks/yamlx/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/emperorsixpacks/yamlx/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/emperorsixpacks/yamlx/compare/v1.0.3...v1.1.0

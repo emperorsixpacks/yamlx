@@ -14,29 +14,46 @@ func cleanYamlTags(t reflect.Type) reflect.Type {
 		return cached
 	}
 
-	if t.Kind() == reflect.Pointer {
+	switch t.Kind() {
+	case reflect.Pointer:
 		inner := cleanYamlTags(t.Elem())
-		typeCache[t] = reflect.PointerTo(inner)
-		return reflect.PointerTo(inner)
-	}
-
-	if t.Kind() != reflect.Struct {
+		res := reflect.PointerTo(inner)
+		typeCache[t] = res
+		return res
+	case reflect.Slice:
+		inner := cleanYamlTags(t.Elem())
+		res := reflect.SliceOf(inner)
+		typeCache[t] = res
+		return res
+	case reflect.Array:
+		inner := cleanYamlTags(t.Elem())
+		res := reflect.ArrayOf(t.Len(), inner)
+		typeCache[t] = res
+		return res
+	case reflect.Map:
+		key := cleanYamlTags(t.Key())
+		val := cleanYamlTags(t.Elem())
+		res := reflect.MapOf(key, val)
+		typeCache[t] = res
+		return res
+	case reflect.Struct:
+		fields := make([]reflect.StructField, t.NumField())
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			tag := f.Tag.Get("yaml")
+			if tag != "" {
+				f.Tag = reflect.StructTag(`yaml:"` + stripCustomDirectives(tag) + `"`)
+			}
+			f.Type = cleanYamlTags(f.Type)
+			fields[i] = f
+		}
+		newType := reflect.StructOf(fields)
+		typeCache[t] = newType
+		return newType
+	default:
 		typeCache[t] = t
 		return t
 	}
-
-	fields := make([]reflect.StructField, t.NumField())
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		tag := f.Tag.Get("yaml")
-		if tag != "" {
-			f.Tag = reflect.StructTag(`yaml:"` + stripCustomDirectives(tag) + `"`)
-		}
-		fields[i] = f
-	}
-	newType := reflect.StructOf(fields)
-	typeCache[t] = newType
-	return newType
 }
 
 // stripCustomDirectives removes our custom directives from a yaml tag string.
@@ -90,12 +107,44 @@ func validateStruct(s any) error {
 		fieldVal := val.Field(i)
 
 		tag := field.Tag.Get("yaml")
-		if tag == "" {
-			continue
+		if tag != "" {
+			if err := validateField(field.Name, fieldVal, tag); err != nil {
+				return err
+			}
 		}
 
-		if err := validateField(field.Name, fieldVal, tag); err != nil {
+		if err := validateRecursive(fieldVal); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateRecursive(val reflect.Value) error {
+	switch val.Kind() {
+	case reflect.Pointer:
+		if !val.IsNil() {
+			return validateRecursive(val.Elem())
+		}
+	case reflect.Struct:
+		if val.CanAddr() {
+			return validateStruct(val.Addr().Interface())
+		} else {
+			tmp := reflect.New(val.Type()).Elem()
+			tmp.Set(val)
+			return validateStruct(tmp.Addr().Interface())
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < val.Len(); i++ {
+			if err := validateRecursive(val.Index(i)); err != nil {
+				return err
+			}
+		}
+	case reflect.Map:
+		for _, key := range val.MapKeys() {
+			if err := validateRecursive(val.MapIndex(key)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
