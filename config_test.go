@@ -1080,5 +1080,38 @@ port: !if $env.network == "testnet" 8080 else 443
 		assert.Equal(t, "testnet", cfg.Env.Network)
 		assert.Equal(t, 8080, cfg.Port)
 	})
+
+	t.Run("variable reference from included file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		err := os.WriteFile(filepath.Join(tmpDir, "db.yaml"), []byte("port: 5432\nuser: postgres\n"), 0644)
+		assert.NoError(t, err)
+
+		origDir, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origDir)
+
+		yml := []byte(`
+db: !include db.yaml
+indexer:
+  db_port: $db.port
+  db_user: $db.user
+`)
+		var cfg struct {
+			DB struct {
+				Port int    `yaml:"port"`
+				User string `yaml:"user"`
+			} `yaml:"db"`
+			Indexer struct {
+				DBPort int    `yaml:"db_port"`
+				DBUser string `yaml:"db_user"`
+			} `yaml:"indexer"`
+		}
+		err = Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, 5432, cfg.DB.Port)
+		assert.Equal(t, "postgres", cfg.DB.User)
+		assert.Equal(t, 5432, cfg.Indexer.DBPort)
+		assert.Equal(t, "postgres", cfg.Indexer.DBUser)
+	})
 }
 
