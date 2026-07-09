@@ -1,6 +1,7 @@
 package yamlx
 
 import (
+	"maps"
 	"os"
 	"reflect"
 	"strings"
@@ -46,6 +47,8 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 	for k, v := range cfg.extraVars {
 		vars[k] = v
 	}
+
+	maps.Copy(vars, cfg.extraVars)
 
 	// Extract dot-path variables from temporary AST parsing to support dot-paths in conditionals
 	var tempDoc yaml.Node

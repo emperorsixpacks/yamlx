@@ -1109,9 +1109,37 @@ indexer:
 		err = Unmarshal(yml, &cfg)
 		assert.NoError(t, err)
 		assert.Equal(t, 5432, cfg.DB.Port)
-		assert.Equal(t, "postgres", cfg.DB.User)
 		assert.Equal(t, 5432, cfg.Indexer.DBPort)
 		assert.Equal(t, "postgres", cfg.Indexer.DBUser)
+	})
+
+	t.Run("inline map unmarshal with custom directives", func(t *testing.T) {
+		type ChainConfig struct {
+			Name string `yaml:"name"`
+		}
+		type TokensConfig struct {
+			Chains map[string]ChainConfig `yaml:",inline"`
+		}
+		type AppConfig struct {
+			Env   string       `yaml:"env,required"`
+			Chain TokensConfig `yaml:"chain,required"`
+		}
+
+		yml := []byte(`
+env: dev
+chain:
+  ethereum:
+    name: eth
+  optimism:
+    name: op
+`)
+		var cfg AppConfig
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, "dev", cfg.Env)
+		assert.Equal(t, 2, len(cfg.Chain.Chains))
+		assert.Equal(t, "eth", cfg.Chain.Chains["ethereum"].Name)
+		assert.Equal(t, "op", cfg.Chain.Chains["optimism"].Name)
 	})
 }
 

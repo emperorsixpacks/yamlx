@@ -42,9 +42,11 @@ func cleanYamlTags(t reflect.Type) reflect.Type {
 			f := t.Field(i)
 			tag := f.Tag.Get("yaml")
 			if tag != "" {
-				f.Tag = reflect.StructTag(`yaml:"` + stripCustomDirectives(tag) + `"`)
+				stripped := stripCustomDirectives(tag)
+				f.Tag = reflect.StructTag(`yaml:"` + stripped + `"`)
 			}
 			f.Type = cleanYamlTags(f.Type)
+			f.PkgPath = ""
 			fields[i] = f
 		}
 		newType := reflect.StructOf(fields)
@@ -60,12 +62,16 @@ func cleanYamlTags(t reflect.Type) reflect.Type {
 func stripCustomDirectives(tag string) string {
 	parts := strings.Split(tag, ",")
 	fieldName := ""
+	hasFieldName := false
 	standard := []string{}
 
 	for i, part := range parts {
 		part = strings.TrimSpace(part)
-		if i == 0 && !isDirective(part) {
-			fieldName = part
+		if i == 0 {
+			if !isDirective(part) && part != "" {
+				fieldName = part
+				hasFieldName = true
+			}
 			continue
 		}
 		if isStandardYamlDirective(part) {
@@ -75,7 +81,11 @@ func stripCustomDirectives(tag string) string {
 
 	result := fieldName
 	if len(standard) > 0 {
-		result += "," + strings.Join(standard, ",")
+		if hasFieldName {
+			result += "," + strings.Join(standard, ",")
+		} else {
+			result = "," + strings.Join(standard, ",")
+		}
 	}
 	return result
 }
@@ -88,7 +98,7 @@ func isDirective(s string) bool {
 }
 
 func isStandardYamlDirective(s string) bool {
-	return s == "omitempty" || s == "string" || s == "flow"
+	return s == "omitempty" || s == "string" || s == "flow" || s == "inline"
 }
 
 // validateStruct checks custom directives in yaml: tags and validates values.
