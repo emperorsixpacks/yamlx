@@ -124,7 +124,7 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 	}
 
 	if !cfg.skipValidation {
-		if err := validateStruct(o); err != nil {
+		if err := validateStruct(o, &doc); err != nil {
 			return err
 		}
 	}

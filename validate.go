@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 var typeCache = make(map[reflect.Type]reflect.Type)
@@ -102,7 +104,7 @@ func isStandardYamlDirective(s string) bool {
 }
 
 // validateStruct checks custom directives in yaml: tags and validates values.
-func validateStruct(s any) error {
+func validateStruct(s any, node *yaml.Node) error {
 	val := reflect.ValueOf(s)
 	if val.Kind() == reflect.Pointer {
 		val = val.Elem()
@@ -116,59 +118,137 @@ func validateStruct(s any) error {
 		field := typ.Field(i)
 		fieldVal := val.Field(i)
 
+		var fieldNode *yaml.Node
+		if node != nil {
+			fieldNode = findValueNode(node, getFieldName(field))
+		}
+
 		tag := field.Tag.Get("yaml")
 		if tag != "" {
-			if err := validateField(field.Name, fieldVal, tag); err != nil {
+			if err := validateField(field.Name, fieldVal, tag, fieldNode != nil); err != nil {
 				return err
 			}
 		}
 
-		if err := validateRecursive(fieldVal); err != nil {
+		if err := validateRecursive(fieldVal, fieldNode); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateRecursive(val reflect.Value) error {
-	switch val.Kind() {
-	case reflect.Pointer:
-		if !val.IsNil() {
-			return validateRecursive(val.Elem())
-		}
-	case reflect.Struct:
-		if val.CanAddr() {
-			return validateStruct(val.Addr().Interface())
-		} else {
-			tmp := reflect.New(val.Type()).Elem()
-			tmp.Set(val)
-			return validateStruct(tmp.Addr().Interface())
-		}
-	case reflect.Slice, reflect.Array:
-		for i := 0; i < val.Len(); i++ {
-			if err := validateRecursive(val.Index(i)); err != nil {
-				return err
+func findValueNode(node *yaml.Node, key string) *yaml.Node {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.DocumentNode {
+		for _, child := range node.Content {
+			if val := findValueNode(child, key); val != nil {
+				return val
 			}
 		}
-	case reflect.Map:
-		for _, key := range val.MapKeys() {
-			if err := validateRecursive(val.MapIndex(key)); err != nil {
-				return err
+		return nil
+	}
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i < len(node.Content); i += 2 {
+			if node.Content[i].Value == key {
+				return node.Content[i+1]
 			}
 		}
 	}
 	return nil
 }
 
-func validateField(name string, val reflect.Value, tag string) error {
+func getFieldName(field reflect.StructField) string {
+	tag := field.Tag.Get("yaml")
+	if tag != "" {
+		parts := strings.Split(tag, ",")
+		name := strings.TrimSpace(parts[0])
+		if name != "" && name != "-" {
+			return name
+		}
+	}
+	return strings.ToLower(field.Name)
+}
+
+func validateRecursive(val reflect.Value, node *yaml.Node) error {
+	switch val.Kind() {
+	case reflect.Pointer:
+		if !val.IsNil() {
+			return validateRecursive(val.Elem(), node)
+		}
+	case reflect.Struct:
+		if val.CanAddr() {
+			return validateStruct(val.Addr().Interface(), node)
+		} else {
+			tmp := reflect.New(val.Type()).Elem()
+			tmp.Set(val)
+			err := validateStruct(tmp.Addr().Interface(), node)
+			if err == nil && val.CanSet() {
+				val.Set(tmp)
+			}
+			return err
+		}
+	case reflect.Slice, reflect.Array:
+		var elements []*yaml.Node
+		if node != nil && node.Kind == yaml.SequenceNode {
+			elements = node.Content
+		}
+		for i := 0; i < val.Len(); i++ {
+			var elemNode *yaml.Node
+			if i < len(elements) {
+				elemNode = elements[i]
+			}
+			if err := validateRecursive(val.Index(i), elemNode); err != nil {
+				return err
+			}
+		}
+	case reflect.Map:
+		if node != nil && node.Kind == yaml.MappingNode {
+			for _, key := range val.MapKeys() {
+				var valNode *yaml.Node
+				keyStr := formatValue(key)
+				for i := 0; i < len(node.Content); i += 2 {
+					if node.Content[i].Value == keyStr {
+						valNode = node.Content[i+1]
+						break
+					}
+				}
+				mapVal := val.MapIndex(key)
+				tmp := reflect.New(mapVal.Type()).Elem()
+				tmp.Set(mapVal)
+				if err := validateRecursive(tmp, valNode); err != nil {
+					return err
+				}
+				val.SetMapIndex(key, tmp)
+			}
+		} else {
+			for _, key := range val.MapKeys() {
+				mapVal := val.MapIndex(key)
+				tmp := reflect.New(mapVal.Type()).Elem()
+				tmp.Set(mapVal)
+				if err := validateRecursive(tmp, nil); err != nil {
+					return err
+				}
+				val.SetMapIndex(key, tmp)
+			}
+		}
+	}
+	return nil
+}
+
+func validateField(name string, val reflect.Value, tag string, present bool) error {
 	directives := parseYamlTag(tag)
 
-	if def, ok := directives["default"]; ok && val.IsZero() {
+	_, hasOmitEmpty := directives["omitempty"]
+	shouldApplyDefault := !present || (hasOmitEmpty && val.IsZero())
+
+	if def, ok := directives["default"]; ok && shouldApplyDefault {
 		applyDefault(val, def)
 	}
 
 	if _, ok := directives["required"]; ok {
-		if val.IsZero() {
+		if !present || val.IsZero() {
 			return NewConfigError("field " + name + " is required")
 		}
 	}
@@ -240,6 +320,7 @@ func parseYamlTag(tag string) map[string]string {
 			continue
 		}
 		if part == "omitempty" || part == "string" || part == "flow" {
+			directives[part] = ""
 			continue
 		}
 		if idx := strings.Index(part, "="); idx != -1 {

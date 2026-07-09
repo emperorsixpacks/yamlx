@@ -1141,5 +1141,30 @@ chain:
 		assert.Equal(t, "eth", cfg.Chain.Chains["ethereum"].Name)
 		assert.Equal(t, "op", cfg.Chain.Chains["optimism"].Name)
 	})
+
+	t.Run("custom types and bool types parsing and omitempty", func(t *testing.T) {
+		type NetworkType string
+		type CustomBool bool
+
+		type ConfigWithCustomTypes struct {
+			Network     NetworkType `yaml:"network_type,default=mainnet"`
+			Enabled     bool        `yaml:"enabled,default=true"`
+			CustomFlag  CustomBool  `yaml:"custom_flag,default=false"`
+			OmittedVal  NetworkType `yaml:"omitted_val,omitempty"`
+			OmittedBool bool        `yaml:"omitted_bool,omitempty"`
+		}
+
+		yml := []byte(`
+network_type: testnet
+enabled: false
+custom_flag: true
+`)
+		var cfg ConfigWithCustomTypes
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, NetworkType("testnet"), cfg.Network)
+		assert.Equal(t, false, cfg.Enabled)
+		assert.Equal(t, CustomBool(true), cfg.CustomFlag)
+	})
 }
 
