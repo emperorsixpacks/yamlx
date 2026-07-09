@@ -1055,5 +1055,30 @@ port: !if $env.network == "testnet" 8080 else 443
 		assert.Equal(t, "testnet", cfg.Env.Network)
 		assert.Equal(t, 8080, cfg.Port)
 	})
+
+	t.Run("dot-path variable from included file in conditional", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		err := os.WriteFile(filepath.Join(tmpDir, "env.yaml"), []byte("network: testnet\n"), 0644)
+		assert.NoError(t, err)
+
+		origDir, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origDir)
+
+		yml := []byte(`
+env: !include env.yaml
+port: !if $env.network == "testnet" 8080 else 443
+`)
+		var cfg struct {
+			Env struct {
+				Network string `yaml:"network"`
+			} `yaml:"env"`
+			Port int `yaml:"port"`
+		}
+		err = Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, "testnet", cfg.Env.Network)
+		assert.Equal(t, 8080, cfg.Port)
+	})
 }
 

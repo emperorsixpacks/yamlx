@@ -50,6 +50,9 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 	// Extract dot-path variables from temporary AST parsing to support dot-paths in conditionals
 	var tempDoc yaml.Node
 	if err := yaml.Unmarshal(in, &tempDoc); err == nil {
+		if !cfg.skipIncludes {
+			_ = resolveIncludes(&tempDoc)
+		}
 		tempVars := collectYamlVars(&tempDoc)
 		for k, v := range tempVars {
 			if resolved, err := resolvePlaceHolder(v); err == nil {
