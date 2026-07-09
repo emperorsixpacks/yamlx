@@ -47,6 +47,20 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 		vars[k] = v
 	}
 
+	// Extract dot-path variables from temporary AST parsing to support dot-paths in conditionals
+	var tempDoc yaml.Node
+	if err := yaml.Unmarshal(in, &tempDoc); err == nil {
+		tempVars := collectYamlVars(&tempDoc)
+		for k, v := range tempVars {
+			vars[k] = v
+		}
+		tempPathVars := make(map[string]pathVar)
+		buildPathMap(&tempDoc, nil, 0, tempPathVars)
+		for k, v := range tempPathVars {
+			vars[k] = v.value
+		}
+	}
+
 	out := in
 	if !cfg.skipIf {
 		out = preprocessIf(in, vars)

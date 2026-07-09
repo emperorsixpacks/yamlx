@@ -1019,5 +1019,23 @@ port: !if $env == prod 443 else 8080
 		assert.NoError(t, err)
 		assert.Equal(t, 443, cfg.Port)
 	})
+
+	t.Run("dot-path variable in conditional", func(t *testing.T) {
+		yml := []byte(`
+env:
+  network: testnet
+port: !if $env.network == "testnet" 8080 else 443
+`)
+		var cfg struct {
+			Env struct {
+				Network string `yaml:"network"`
+			} `yaml:"env"`
+			Port int `yaml:"port"`
+		}
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, "testnet", cfg.Env.Network)
+		assert.Equal(t, 8080, cfg.Port)
+	})
 }
 

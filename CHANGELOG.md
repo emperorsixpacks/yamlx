@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-07-09
+
+### Fixed
+
+- **Dot-Path Conditionals** — Supported resolving dot-path variables (e.g. `$env.network`) in `!if` conditional statement evaluations.
+
 ## [1.3.2] - 2026-07-09
 
 ### Fixed
@@ -59,7 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Functional options: `SkipEnvVars()`, `SkipValidation()`, `WithVars()`, `SkipIf()`, `SkipIncludes()`
 - `UnmarshalWithTiming` for per-phase performance tracking
 
-[Unreleased]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.3...HEAD
+[1.3.3]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/emperorsixpacks/yamlx/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/emperorsixpacks/yamlx/compare/v1.2.0...v1.3.0
