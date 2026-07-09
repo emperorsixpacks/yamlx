@@ -90,6 +90,8 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 		}
 	}
 
+	resolveNodeTypes(&doc, reflect.TypeOf(o))
+
 	if err := unmarshalClean(nodeToBytes(&doc), o); err != nil {
 		return err
 	}
@@ -353,4 +355,89 @@ func copyValue(dst, src reflect.Value) {
 			dst.Set(src)
 		}
 	}
+}
+
+func resolveNodeTypes(node *yaml.Node, t reflect.Type) {
+	if node == nil || t == nil {
+		return
+	}
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	switch node.Kind {
+	case yaml.DocumentNode:
+		for _, child := range node.Content {
+			resolveNodeTypes(child, t)
+		}
+
+	case yaml.MappingNode:
+		if t.Kind() == reflect.Struct {
+			for i := 0; i < len(node.Content); i += 2 {
+				keyNode := node.Content[i]
+				valNode := node.Content[i+1]
+				if field, ok := findStructField(t, keyNode.Value); ok {
+					resolveNodeTypes(valNode, field.Type)
+				}
+			}
+		} else if t.Kind() == reflect.Map {
+			keyType := t.Key()
+			valType := t.Elem()
+			for i := 0; i < len(node.Content); i += 2 {
+				resolveNodeTypes(node.Content[i], keyType)
+				resolveNodeTypes(node.Content[i+1], valType)
+			}
+		}
+
+	case yaml.SequenceNode:
+		if t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
+			elemType := t.Elem()
+			for _, child := range node.Content {
+				resolveNodeTypes(child, elemType)
+			}
+		}
+
+	case yaml.ScalarNode:
+		if node.Tag == "!!str" {
+			switch t.Kind() {
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				node.Tag = "!!int"
+				node.Style = 0
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+				node.Tag = "!!int"
+				node.Style = 0
+			case reflect.Float32, reflect.Float64:
+				node.Tag = "!!float"
+				node.Style = 0
+			case reflect.Bool:
+				node.Tag = "!!bool"
+				node.Style = 0
+			}
+		}
+	}
+}
+
+func findStructField(t reflect.Type, key string) (reflect.StructField, bool) {
+	if t.Kind() != reflect.Struct {
+		return reflect.StructField{}, false
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := f.Tag.Get("yaml")
+		name := ""
+		if tag != "" {
+			parts := strings.Split(tag, ",")
+			name = strings.TrimSpace(parts[0])
+		}
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = strings.ToLower(f.Name)
+		}
+		if name == strings.ToLower(key) {
+			return f, true
+		}
+	}
+	return reflect.StructField{}, false
 }

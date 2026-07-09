@@ -946,3 +946,78 @@ db_port: ${TEST_DB_PORT}
 		// pattern is validated by the other tests.
 	})
 }
+
+func TestTypeCoercion(t *testing.T) {
+	type CoercedConfig struct {
+		Port    int     `yaml:"port"`
+		Active  bool    `yaml:"active"`
+		Timeout float64 `yaml:"timeout"`
+	}
+
+	yml := []byte(`
+port: "8080"
+active: "true"
+timeout: "1.5"
+`)
+	var cfg CoercedConfig
+	err := Unmarshal(yml, &cfg)
+	assert.NoError(t, err)
+	assert.Equal(t, 8080, cfg.Port)
+	assert.True(t, cfg.Active)
+	assert.Equal(t, 1.5, cfg.Timeout)
+
+	// test invalid bool string
+	ymlInvalid := []byte(`
+port: "8080"
+active: "maybe"
+timeout: "1.5"
+`)
+	var cfgInvalid CoercedConfig
+	err = Unmarshal(ymlInvalid, &cfgInvalid)
+	assert.Error(t, err)
+}
+
+func TestFlexibleConditionals(t *testing.T) {
+	t.Run("single quotes", func(t *testing.T) {
+		yml := []byte(`
+env: 'dev'
+port: !if '$env' == 'dev' 8080 else 443
+`)
+		var cfg struct {
+			Env  string `yaml:"env"`
+			Port int    `yaml:"port"`
+		}
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, 8080, cfg.Port)
+	})
+
+	t.Run("backticks", func(t *testing.T) {
+		yml := []byte(`
+env: dev
+port: !if $env == ` + "`dev`" + ` 8080 else 443
+`)
+		var cfg struct {
+			Env  string `yaml:"env"`
+			Port int    `yaml:"port"`
+		}
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, 8080, cfg.Port)
+	})
+
+	t.Run("unquoted", func(t *testing.T) {
+		yml := []byte(`
+env: prod
+port: !if $env == prod 443 else 8080
+`)
+		var cfg struct {
+			Env  string `yaml:"env"`
+			Port int    `yaml:"port"`
+		}
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, 443, cfg.Port)
+	})
+}
+

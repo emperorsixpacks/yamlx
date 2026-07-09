@@ -63,7 +63,7 @@ func resolveIfLine(line string, vars map[string]string) string {
 
 // resolveIfRef resolves a $var or ${VAR} reference.
 func resolveIfRef(s string, vars map[string]string) string {
-	s = strings.TrimSpace(s)
+	s = stripQuotes(strings.TrimSpace(s))
 	if strings.HasPrefix(s, DelimVar) && !strings.HasPrefix(s, DelimEnv) {
 		varName := s[1:]
 		if val, ok := vars[varName]; ok {
@@ -74,6 +74,17 @@ func resolveIfRef(s string, vars map[string]string) string {
 	if strings.HasPrefix(s, DelimEnv) && strings.HasSuffix(s, "}") {
 		varName := s[2 : len(s)-1]
 		return os.Getenv(varName)
+	}
+	return s
+}
+
+func stripQuotes(s string) string {
+	if len(s) >= 2 {
+		first := s[0]
+		last := s[len(s)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') || (first == '`' && last == '`') {
+			return s[1 : len(s)-1]
+		}
 	}
 	return s
 }
