@@ -273,7 +273,143 @@ func unmarshalClean(data []byte, o any) error {
 	origVal := ptr.Elem()
 	copyValue(origVal, cleanVal)
 
+	// reflect.StructOf-generated types don't support double-inline (inline struct containing
+	// inline map). Detect those fields and re-unmarshal them directly into the original type.
+	fixDoubleInlineFields(data, origVal, structType)
+
 	return nil
+}
+
+// fixDoubleInlineFields finds struct fields that are yaml:",inline" and whose type
+// also contains a yaml:",inline" map field (double-inline). For these, yaml.Unmarshal
+// into reflect.StructOf-generated types fails silently, so we re-unmarshal directly
+// into the original field type, filtering the data to only the keys that belong there.
+func fixDoubleInlineFields(data []byte, val reflect.Value, t reflect.Type) {
+	if t.Kind() != reflect.Struct {
+		return
+	}
+
+	// Collect all non-inline field names so we can exclude them when building the
+	// filtered document for inline-map fields.
+	nonInlineKeys := collectNonInlineKeys(t)
+
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := f.Tag.Get("yaml")
+		if !isInlineTag(tag) {
+			continue
+		}
+		ft := f.Type
+		for ft.Kind() == reflect.Pointer {
+			ft = ft.Elem()
+		}
+		if ft.Kind() != reflect.Struct {
+			continue
+		}
+		if !hasInlineMapField(ft) {
+			// Recurse into inline struct in case of deeper nesting
+			fieldVal := val.Field(i)
+			for fieldVal.Kind() == reflect.Pointer {
+				fieldVal = fieldVal.Elem()
+			}
+			if fieldVal.Kind() == reflect.Struct {
+				fixDoubleInlineFields(data, fieldVal, ft)
+			}
+			continue
+		}
+
+		// Build a filtered YAML document that excludes non-inline (named) keys from
+		// the parent struct, so we don't get type errors when unmarshalling the inline map.
+		filtered := filterYAMLKeys(data, nonInlineKeys)
+		fieldPtr := reflect.New(f.Type)
+		if err := yaml.Unmarshal(filtered, fieldPtr.Interface()); err == nil {
+			if val.Field(i).CanSet() {
+				val.Field(i).Set(fieldPtr.Elem())
+			}
+		}
+	}
+}
+
+// collectNonInlineKeys returns all yaml key names defined by non-inline fields in struct t.
+func collectNonInlineKeys(t reflect.Type) map[string]bool {
+	keys := make(map[string]bool)
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := f.Tag.Get("yaml")
+		if isInlineTag(tag) {
+			continue
+		}
+		name := ""
+		if tag != "" {
+			parts := strings.Split(tag, ",")
+			name = strings.TrimSpace(parts[0])
+		}
+		if name == "" || name == "-" {
+			name = strings.ToLower(f.Name)
+		}
+		if name != "-" {
+			keys[name] = true
+		}
+	}
+	return keys
+}
+
+// filterYAMLKeys returns a YAML document with top-level keys excluded by the given set.
+func filterYAMLKeys(data []byte, exclude map[string]bool) []byte {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil || len(doc.Content) == 0 {
+		return data
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return data
+	}
+	filtered := &yaml.Node{Kind: yaml.MappingNode, Tag: root.Tag, Style: root.Style}
+	for j := 0; j+1 < len(root.Content); j += 2 {
+		keyNode := root.Content[j]
+		valNode := root.Content[j+1]
+		if !exclude[keyNode.Value] {
+			filtered.Content = append(filtered.Content, keyNode, valNode)
+		}
+	}
+	docNode := &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{filtered}}
+	out, err := yaml.Marshal(docNode)
+	if err != nil {
+		return data
+	}
+	return out
+}
+
+// isInlineTag reports whether a yaml tag contains ",inline".
+func isInlineTag(tag string) bool {
+	for _, part := range strings.Split(tag, ",") {
+		if strings.TrimSpace(part) == "inline" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasInlineMapField reports whether struct type t has a direct field with yaml:",inline"
+// whose type is a map.
+func hasInlineMapField(t reflect.Type) bool {
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !isInlineTag(f.Tag.Get("yaml")) {
+			continue
+		}
+		ft := f.Type
+		for ft.Kind() == reflect.Pointer {
+			ft = ft.Elem()
+		}
+		if ft.Kind() == reflect.Map {
+			return true
+		}
+	}
+	return false
 }
 
 // hasCustomDirectives checks if a struct type has any custom yaml directives.
@@ -324,6 +460,20 @@ func copyValue(dst, src reflect.Value) {
 	if src.Type().AssignableTo(dst.Type()) {
 		dst.Set(src)
 		return
+	}
+
+	// Handle named types with a convertible underlying kind (e.g. type NetworkType string,
+	// type CustomBool bool). cleanYamlTags produces plain underlying types, so src is string
+	// while dst is NetworkType — not assignable but convertible.
+	if src.Type().ConvertibleTo(dst.Type()) {
+		switch dst.Kind() {
+		case reflect.String, reflect.Bool,
+			reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+			reflect.Float32, reflect.Float64:
+			dst.Set(src.Convert(dst.Type()))
+			return
+		}
 	}
 
 	switch dst.Kind() {

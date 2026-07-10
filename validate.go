@@ -48,7 +48,9 @@ func cleanYamlTags(t reflect.Type) reflect.Type {
 				f.Tag = reflect.StructTag(`yaml:"` + stripped + `"`)
 			}
 			f.Type = cleanYamlTags(f.Type)
-			f.PkgPath = ""
+			if f.PkgPath != "" {
+				f.PkgPath = t.PkgPath()
+			}
 			fields[i] = f
 		}
 		newType := reflect.StructOf(fields)

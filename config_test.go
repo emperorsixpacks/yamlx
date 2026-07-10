@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/emperorsixpacks/yamlx/domain"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
 )
@@ -1218,6 +1219,7 @@ enabled: false
 		type NetworkType string
 		type Token struct {
 			Symbol string `yaml:"symbol"`
+			secret string
 		}
 		type ChainConfig struct {
 			ChainID       int64       `yaml:"chain_id"`
@@ -1262,6 +1264,90 @@ token:
 		assert.Equal(t, NetworkType("evm"), eth.NetworkType)
 		assert.Equal(t, 1, len(eth.Tokens))
 		assert.Equal(t, "ETH", eth.Tokens[0].Symbol)
+	})
+
+	t.Run("custom type in inlined map struct from separate domain package", func(t *testing.T) {
+		type ChainConfig struct {
+			ChainID       int64              `yaml:"chain_id"`
+			RPC           string             `yaml:"rpc"`
+			Confirmations int                `yaml:"confirmations"`
+			NetworkType   domain.NetworkType `yaml:"network_type"`
+			Tokens        []domain.Token     `yaml:"tokens"`
+		}
+		type TokensConfig struct {
+			Chains map[string]ChainConfig `yaml:",inline"`
+		}
+		type AppConfig struct {
+			Env   string       `yaml:"env,required"`
+			Token TokensConfig `yaml:"token"`
+		}
+
+		yml := []byte(`
+env: prod
+token:
+  ethereum:
+    chain_id: 1
+    rpc: http://localhost:8545
+    confirmations: 12
+    network_type: evm
+    tokens:
+      - symbol: ETH
+  optimism:
+    chain_id: 10
+    rpc: http://localhost:8546
+    confirmations: 2
+    network_type: evm
+    tokens:
+      - symbol: OP
+`)
+		var cfg AppConfig
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, "prod", cfg.Env)
+		assert.Equal(t, 2, len(cfg.Token.Chains))
+		eth := cfg.Token.Chains["ethereum"]
+		assert.Equal(t, int64(1), eth.ChainID)
+		assert.Equal(t, domain.NetworkType("evm"), eth.NetworkType)
+		assert.Equal(t, 1, len(eth.Tokens))
+		assert.Equal(t, "ETH", eth.Tokens[0].Symbol)
+	})
+
+	t.Run("custom type in inlined map struct from separate domain package with exact user layout", func(t *testing.T) {
+		type ChainConfig struct {
+			ChainID       int64              `yaml:"chain_id"`
+			RPC           string             `yaml:"rpc"`
+			Confirmations int                `yaml:"confirmations"`
+			NetworkType   domain.NetworkType `yaml:"network_type"`
+			Tokens        []domain.Token     `yaml:"tokens"`
+		}
+		type TokensConfig struct {
+			Chains map[string]ChainConfig `yaml:",inline"`
+		}
+		type AppConfig struct {
+			Env   string       `yaml:"env,required"`
+			Token TokensConfig `yaml:",inline"`
+		}
+
+		yml := []byte(`
+env: prod
+base_sepolia:
+  chain_id: 84532
+  rpc: "https://sepolia.base.org"
+  network_type: evm
+  confirmations: 3
+  tokens:
+    - symbol: USDC
+`)
+		var cfg AppConfig
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, "prod", cfg.Env)
+		assert.Equal(t, 1, len(cfg.Token.Chains))
+		base := cfg.Token.Chains["base_sepolia"]
+		assert.Equal(t, int64(84532), base.ChainID)
+		assert.Equal(t, domain.NetworkType("evm"), base.NetworkType)
+		assert.Equal(t, 1, len(base.Tokens))
+		assert.Equal(t, "USDC", base.Tokens[0].Symbol)
 	})
 }
 
