@@ -1312,8 +1312,7 @@ token:
 		assert.Equal(t, "ETH", eth.Tokens[0].Symbol)
 	})
 
-	t.Run("custom type in inlined map struct from separate domain package with exact user layout", func(t *testing.T) {
-		type ChainConfig struct {
+	t.Run("custom type in inlined map struct from separate domain package with exact user layout", func(t *testing.T) {		type ChainConfig struct {
 			ChainID       int64              `yaml:"chain_id"`
 			RPC           string             `yaml:"rpc"`
 			Confirmations int                `yaml:"confirmations"`
@@ -1348,6 +1347,68 @@ base_sepolia:
 		assert.Equal(t, domain.NetworkType("evm"), base.NetworkType)
 		assert.Equal(t, 1, len(base.Tokens))
 		assert.Equal(t, "USDC", base.Tokens[0].Symbol)
+	})
+
+	t.Run("non-inline map struct with custom types and bool in sibling struct", func(t *testing.T) {
+		// Regression: copyValue map case was reading from a non-addressable MapIndex value,
+		// causing named types (domain.NetworkType) and bool fields in nested structs to be zero.
+		type ChainConfig struct {
+			ChainID       int64              `yaml:"chain_id"`
+			RPC           string             `yaml:"rpc"`
+			Confirmations int                `yaml:"confirmations"`
+			NetworkType   domain.NetworkType `yaml:"network_type"`
+			Tokens        []domain.Token     `yaml:"tokens"`
+		}
+		type TokensConfig struct {
+			Chains map[string]ChainConfig `yaml:",inline"`
+		}
+		type IndexerConfig struct {
+			HealthAddr string `yaml:"health_addr,required"`
+			LogLevel   string `yaml:"log_level,required,enum=debug|info|warn|error"`
+			LogJSON    bool   `yaml:"log_json"`
+		}
+		type AppConfig struct {
+			Chain   TokensConfig  `yaml:"chain,required"`
+			Indexer IndexerConfig `yaml:"indexer,required"`
+		}
+
+		yml := []byte(`
+chain:
+  base:
+    chain_id: 8453
+    rpc: https://mainnet.base.org
+    confirmations: 3
+    network_type: evm
+    tokens:
+      - symbol: USDC
+  ethereum:
+    chain_id: 1
+    rpc: https://mainnet.eth.org
+    confirmations: 12
+    network_type: evm
+    tokens:
+      - symbol: ETH
+indexer:
+  health_addr: :8080
+  log_level: info
+  log_json: true
+`)
+		var cfg AppConfig
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(cfg.Chain.Chains))
+
+		base := cfg.Chain.Chains["base"]
+		assert.Equal(t, int64(8453), base.ChainID)
+		assert.Equal(t, domain.NetworkType("evm"), base.NetworkType)
+		assert.Equal(t, 1, len(base.Tokens))
+		assert.Equal(t, "USDC", base.Tokens[0].Symbol)
+
+		eth := cfg.Chain.Chains["ethereum"]
+		assert.Equal(t, domain.NetworkType("evm"), eth.NetworkType)
+
+		assert.Equal(t, "info", cfg.Indexer.LogLevel)
+		assert.Equal(t, true, cfg.Indexer.LogJSON)
 	})
 }
 

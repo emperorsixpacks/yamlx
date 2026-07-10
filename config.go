@@ -520,9 +520,15 @@ func copyValue(dst, src reflect.Value) {
 			dstKey := reflect.New(dst.Type().Key()).Elem()
 			copyValue(dstKey, key)
 
-			val := src.MapIndex(key)
+			// MapIndex returns a non-addressable value; copy into an addressable
+			// temporary so that nested copyValue calls (struct fields, slices, etc.)
+			// can be set correctly.
+			rawVal := src.MapIndex(key)
+			srcVal := reflect.New(rawVal.Type()).Elem()
+			srcVal.Set(rawVal)
+
 			dstVal := reflect.New(dst.Type().Elem()).Elem()
-			copyValue(dstVal, val)
+			copyValue(dstVal, srcVal)
 
 			dst.SetMapIndex(dstKey, dstVal)
 		}
