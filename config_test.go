@@ -1094,6 +1094,37 @@ port: !if $env.network == "testnet" 8080 else 443
 		assert.Equal(t, 8080, cfg.Port)
 	})
 
+	t.Run("nested dot-path in !if selects correct !include", func(t *testing.T) {
+		// Regression: yaml.Unmarshal on raw bytes fails on !if lines, so nested
+		// dot-path vars (e.g. $env.network) were not extracted for use in conditionals.
+		tmpDir := t.TempDir()
+		os.WriteFile(filepath.Join(tmpDir, "testnet.yaml"), []byte("chain_id: 84532\nnetwork_type: evm\n"), 0644)
+		os.WriteFile(filepath.Join(tmpDir, "mainnet.yaml"), []byte("chain_id: 1\nnetwork_type: evm\n"), 0644)
+
+		origDir, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origDir)
+
+		yml := []byte(`
+env:
+  network: testnet
+chain: !if $env.network == "testnet" !include testnet.yaml else !include mainnet.yaml
+`)
+		var cfg struct {
+			Env struct {
+				Network string `yaml:"network"`
+			} `yaml:"env"`
+			Chain struct {
+				ChainID     int    `yaml:"chain_id"`
+				NetworkType string `yaml:"network_type"`
+			} `yaml:"chain"`
+		}
+		err := Unmarshal(yml, &cfg)
+		assert.NoError(t, err)
+		assert.Equal(t, 84532, cfg.Chain.ChainID, "should load testnet, not mainnet")
+		assert.Equal(t, "evm", cfg.Chain.NetworkType)
+	})
+
 	t.Run("variable reference from included file", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		err := os.WriteFile(filepath.Join(tmpDir, "db.yaml"), []byte("port: 5432\nuser: postgres\n"), 0644)

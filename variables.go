@@ -266,3 +266,21 @@ func replaceYamlVars(s string, vars map[string]string, pathVars map[string]pathV
 	}
 	return result.String(), nil
 }
+
+// sanitiseForTempParse replaces values containing !if tags with a placeholder
+// string so that yaml.Unmarshal can parse the document structure without errors.
+// !include tags are left intact so that included files are resolved and their
+// values (e.g. $env.network from an included file) are available for conditionals.
+func sanitiseForTempParse(in []byte) []byte {
+	lines := strings.Split(string(in), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, TagIf) {
+			// Find the key (everything up to the colon) and replace the value with ""
+			if idx := strings.Index(line, ":"); idx != -1 {
+				lines[i] = line[:idx+1] + " \"\""
+			}
+		}
+	}
+	return []byte(strings.Join(lines, "\n"))
+}

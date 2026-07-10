@@ -50,9 +50,11 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 
 	maps.Copy(vars, cfg.extraVars)
 
-	// Extract dot-path variables from temporary AST parsing to support dot-paths in conditionals
+	// Extract dot-path variables from temporary AST parsing to support dot-paths in conditionals.
+	// We sanitise the raw bytes first (replacing !if and !include values with a placeholder)
+	// so yaml.Unmarshal can parse the document structure even when custom tags are present.
 	var tempDoc yaml.Node
-	if err := yaml.Unmarshal(in, &tempDoc); err == nil {
+	if err := yaml.Unmarshal(sanitiseForTempParse(in), &tempDoc); err == nil {
 		if !cfg.skipIncludes {
 			_ = resolveIncludes(&tempDoc)
 		}
