@@ -250,7 +250,7 @@ func validateField(name string, val reflect.Value, tag string, present bool) err
 	}
 
 	if _, ok := directives["required"]; ok {
-		if !present || val.IsZero() {
+		if !present {
 			return NewConfigError("field " + name + " is required")
 		}
 	}

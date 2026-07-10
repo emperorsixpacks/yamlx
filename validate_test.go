@@ -39,14 +39,54 @@ func TestRequiredValid(t *testing.T) {
 }
 
 func TestRequiredMissing(t *testing.T) {
-	yml := `name: ""`
+	// key absent entirely — should error
+	yml := `{}`
 	var cfg TestRequired
 	err := Unmarshal([]byte(yml), &cfg)
 	if err == nil {
-		t.Fatal("expected error for required field, got nil")
+		t.Fatal("expected error for missing required field, got nil")
 	}
 	if !isConfigError(err) {
 		t.Fatalf("expected configError, got %v", err)
+	}
+}
+
+func TestRequiredPresentButZero(t *testing.T) {
+	// key present with zero value — should NOT error (presence is what matters)
+	yml := `name: ""`
+	var cfg TestRequired
+	err := Unmarshal([]byte(yml), &cfg)
+	if err != nil {
+		t.Fatalf("expected no error when required field is present with empty value, got: %v", err)
+	}
+}
+
+func TestRequiredBoolFalse(t *testing.T) {
+	// bool required field set to false — false is a valid value, must not error
+	type Cfg struct {
+		Enabled bool `yaml:"enabled,required"`
+	}
+	yml := `enabled: false`
+	var cfg Cfg
+	err := Unmarshal([]byte(yml), &cfg)
+	if err != nil {
+		t.Fatalf("required bool=false should not error, got: %v", err)
+	}
+	if cfg.Enabled != false {
+		t.Fatalf("expected false, got %v", cfg.Enabled)
+	}
+}
+
+func TestRequiredBoolMissing(t *testing.T) {
+	// bool required field absent — should error
+	type Cfg struct {
+		Enabled bool `yaml:"enabled,required"`
+	}
+	yml := `{}`
+	var cfg Cfg
+	err := Unmarshal([]byte(yml), &cfg)
+	if err == nil {
+		t.Fatal("expected error for missing required bool field, got nil")
 	}
 }
 
