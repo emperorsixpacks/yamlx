@@ -56,7 +56,7 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 	var tempDoc yaml.Node
 	if err := yaml.Unmarshal(sanitiseForTempParse(in), &tempDoc); err == nil {
 		if !cfg.skipIncludes {
-			_ = resolveIncludes(&tempDoc)
+			_ = resolveIncludes(&tempDoc, cfg.basePath)
 		}
 		tempVars := collectYamlVars(&tempDoc)
 		for k, v := range tempVars {
@@ -81,7 +81,7 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 		out = preprocessIf(in, vars)
 	}
 
-	out, envErr := preprocessEnvFiles(out)
+	out, envErr := preprocessEnvFiles(out, cfg.basePath)
 	if envErr != nil {
 		return envErr
 	}
@@ -92,7 +92,7 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 	}
 
 	if !cfg.skipIncludes {
-		if err := resolveIncludes(&doc); err != nil {
+		if err := resolveIncludes(&doc, cfg.basePath); err != nil {
 			return err
 		}
 	}

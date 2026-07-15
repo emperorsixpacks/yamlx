@@ -43,7 +43,7 @@ func UnmarshalWithTiming(in []byte, o any, opts ...Option) (Timing, error) {
 	t.IfPreprocess = time.Since(t2)
 
 	t2b := time.Now()
-	out, envErr := preprocessEnvFiles(out)
+	out, envErr := preprocessEnvFiles(out, cfg.basePath)
 	if envErr != nil {
 		return t, envErr
 	}
@@ -70,7 +70,7 @@ func UnmarshalWithTiming(in []byte, o any, opts ...Option) (Timing, error) {
 
 	t5 := time.Now()
 	if !cfg.skipIncludes {
-		if err := resolveIncludes(&doc); err != nil {
+		if err := resolveIncludes(&doc, cfg.basePath); err != nil {
 			return t, err
 		}
 	}

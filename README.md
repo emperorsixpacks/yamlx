@@ -105,6 +105,11 @@ db_host: ${DB_HOST}
 db_port: ${DB_PORT}
 ```
 
+| Syntax | Behavior |
+|---|---|
+| `!env ./file.env` | Load file (error if missing) |
+| `!env? ./file.env` | Optional (skip silently if missing) |
+
 Uses [joho/godotenv](https://github.com/joho/godotenv) under the hood — never sends env vars to a server, reads from local files only.
 
 ### Inline Variables `$var`
@@ -300,10 +305,29 @@ All errors come from `yamlx.Unmarshal`:
 ## API
 
 ```go
-func Unmarshal(in []byte, o any) error
+func Unmarshal(in []byte, o any, opts ...Option) error
 ```
 
 One function. Parses YAML, resolves everything, unmarshals into your struct.
+
+### Options
+
+| Option | Description |
+|---|---|
+| `WithBasePath(path)` | Set base directory for `!include` and `!env` relative paths |
+| `WithMaxDepth(n)` | Set max recursive include depth (default 10) |
+| `WithVars(map)` | Add extra variables for `$var` and `!if` |
+| `SkipIncludes()` | Disable `!include` resolution |
+| `SkipEnvVars()` | Disable `${VAR}` env substitution |
+| `SkipIf()` | Disable `!if` conditional preprocessing |
+| `SkipVars()` | Disable `$var` YAML variable references |
+| `SkipValidation()` | Disable automatic `Validate()` calls |
+
+```go
+// Resolve includes relative to the config file's directory
+data, _ := os.ReadFile("config/testnet.yaml")
+yamlx.Unmarshal(data, &cfg, yamlx.WithBasePath("config/"))
+```
 
 ## License
 

@@ -18,8 +18,11 @@ var (
 )
 
 // resolveIncludes walks a yaml.Node tree and resolves any nodes tagged with !include.
-func resolveIncludes(node *yaml.Node) error {
-	basePath, _ := os.Getwd()
+// basePath is the directory used to resolve relative !include paths.
+func resolveIncludes(node *yaml.Node, basePath string) error {
+	if basePath == "" {
+		basePath, _ = os.Getwd()
+	}
 	seen := make(map[string]bool)
 	return resolveIncludesWalk(node, basePath, seen, 0, defaultMaxDepth)
 }

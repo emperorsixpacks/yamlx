@@ -380,6 +380,71 @@ value: from_fallback
 		assert.NoError(t, err)
 		assert.Equal(t, "hey", config.Data.Greeting)
 	})
+
+	t.Run("WithBasePath resolves includes relative to given path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		subDir := filepath.Join(tmpDir, "config")
+		os.MkdirAll(subDir, 0755)
+		os.WriteFile(filepath.Join(subDir, "network.yaml"), []byte(`type: p2p
+subnet: 10.0.0.0/24
+`), 0644)
+
+		yml := []byte(`network: !include ./network.yaml
+`)
+		var config struct {
+			Network struct {
+				Type   string `yaml:"type"`
+				Subnet string `yaml:"subnet"`
+			} `yaml:"network"`
+		}
+		err := Unmarshal(yml, &config, WithBasePath(subDir))
+		assert.NoError(t, err)
+		assert.Equal(t, "p2p", config.Network.Type)
+		assert.Equal(t, "10.0.0.0/24", config.Network.Subnet)
+	})
+
+	t.Run("WithBasePath resolves nested includes relative to included file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		subDir := filepath.Join(tmpDir, "config")
+		os.MkdirAll(subDir, 0755)
+		os.WriteFile(filepath.Join(subDir, "child.yaml"), []byte(`level: child
+`), 0644)
+		os.WriteFile(filepath.Join(subDir, "parent.yaml"), []byte(`child: !include ./child.yaml
+`), 0644)
+
+		yml := []byte(`data: !include ./parent.yaml
+`)
+		var config struct {
+			Data struct {
+				Child struct {
+					Level string `yaml:"level"`
+				} `yaml:"child"`
+			} `yaml:"data"`
+		}
+		err := Unmarshal(yml, &config, WithBasePath(subDir))
+		assert.NoError(t, err)
+		assert.Equal(t, "child", config.Data.Child.Level)
+	})
+
+	t.Run("WithBasePath also resolves !env relative to given path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		subDir := filepath.Join(tmpDir, "config")
+		os.MkdirAll(subDir, 0755)
+		os.WriteFile(filepath.Join(subDir, "app.env"), []byte(`BASE_PATH_VAR=from-subdir
+`), 0644)
+		defer os.Unsetenv("BASE_PATH_VAR")
+		os.Unsetenv("BASE_PATH_VAR")
+
+		yml := []byte(`!env ./app.env
+val: ${BASE_PATH_VAR}
+`)
+		var config struct {
+			Val string `yaml:"val"`
+		}
+		err := Unmarshal(yml, &config, WithBasePath(subDir))
+		assert.NoError(t, err)
+		assert.Equal(t, "from-subdir", config.Val)
+	})
 }
 
 func TestYamlVars(t *testing.T) {
@@ -871,6 +936,54 @@ name: test
 		var config map[string]any
 		err := Unmarshal(yml, &config)
 		assert.Error(t, err)
+	})
+
+	t.Run("!env? skips missing file silently", func(t *testing.T) {
+		yml := []byte(`!env? ./nonexistent.env
+name: test
+`)
+		var config struct {
+			Name string `yaml:"name"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "test", config.Name)
+	})
+
+	t.Run("!env? loads file when it exists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.WriteFile(tmpDir+"/.env", []byte("OPT_VAR=from-optional\n"), 0644)
+
+		origDir, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origDir)
+		defer os.Unsetenv("OPT_VAR")
+		os.Unsetenv("OPT_VAR")
+
+		yml := []byte(`!env? ./.env
+result: ${OPT_VAR}
+`)
+		var config struct {
+			Result string `yaml:"result"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "from-optional", config.Result)
+	})
+
+	t.Run("!env? with other env vars still works", func(t *testing.T) {
+		os.Setenv("ALWAYS_SET", "yes")
+		defer os.Unsetenv("ALWAYS_SET")
+
+		yml := []byte(`!env? ./nonexistent.env
+val: ${ALWAYS_SET}
+`)
+		var config struct {
+			Val string `yaml:"val"`
+		}
+		err := Unmarshal(yml, &config)
+		assert.NoError(t, err)
+		assert.Equal(t, "yes", config.Val)
 	})
 }
 
