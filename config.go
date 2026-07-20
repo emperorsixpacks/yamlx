@@ -77,13 +77,14 @@ func Unmarshal(in []byte, o any, opts ...Option) error {
 	}
 
 	out := in
-	if !cfg.skipIf {
-		out = preprocessIf(in, vars)
-	}
 
 	out, envErr := preprocessEnvFiles(out, cfg.basePath)
 	if envErr != nil {
 		return envErr
+	}
+
+	if !cfg.skipIf {
+		out = preprocessIf(out, vars)
 	}
 
 	var doc yaml.Node
